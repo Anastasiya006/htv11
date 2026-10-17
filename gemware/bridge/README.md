@@ -1,15 +1,17 @@
-# Gemmi bridge (first vertical slice)
+# Gemmi bridge
 
-The bridge is a local queue between agents on this computer and the Gemware
-ESP32. It has no cloud service and no third-party Python packages. By default
-it listens only on `127.0.0.1`, so it is not accidentally exposed to a LAN.
+The bridge is a local queue between agents on this computer and Gemmi
+devices. It has no cloud service and no third-party Python packages. By
+default it listens only on `127.0.0.1`, so it is not accidentally exposed to
+a LAN.
 
 ```bash
 ./gemware/bin/gemmi serve
 ```
 
-It listens on port `8732` and stores events in
-`~/.local/state/gemmi/events.jsonl`. Keep it running while Gemmi is in use.
+It listens on port `8732` and stores events durably in
+`~/.local/state/gemmi/events.jsonl` (events, per-device consumed marks, join
+points, and answers survive restarts). Keep it running while Gemmi is in use.
 For a trusted home LAN, pass `--host 0.0.0.0` and configure the ESP32 with the
 computer's LAN URL. Do not do this on eduroam or another client-isolated
 network.
@@ -20,25 +22,45 @@ An agent posts meaningful state changes through the same wrapper:
 ./gemware/bin/gemmi notify --agent codex --state working "Reading the firmware"
 ./gemware/bin/gemmi ask --agent codex --state needs-attention \
   --choice "Allow" --choice "Deny" "Flash the ESP32?"
+./gemware/bin/gemmi ask --wait 120 --agent codex --choice "Yes" --choice "No" "Deploy?"
 ./gemware/bin/gemmi artifact --agent codex --state reading "Screenshot ready"
+./gemware/bin/gemmi events          # inspect the queue and open asks
+./gemware/bin/gemmi clear           # drop queued events and device cursors
 ```
 
-For now this is an explicit wrapper, rather than ACP integration. It is easier
-to inspect, works with any local agent, and keeps device protocol independent
-from agent vendors. Once the event contract is proven, an ACP/MCP adapter can
-call these same HTTP endpoints without changing Gemware.
+`ask --wait` blocks until a device answers and prints the choice (exit 2 on
+timeout). Testing without a device:
+
+```bash
+python3 gemware/bridge/test_bridge.py
+./gemware/bin/gemmi sim             # interactive software device
+./gemware/bin/gemmi sim --auto      # auto-answers every ask (scripting)
+```
 
 ## HTTP contract
 
-- `POST /v1/events` adds a compact JSON event.
-- `GET /v1/device/next?after=<event-id>` returns the next queued event or
-  `204 No Content`.
-- `GET /health` confirms the bridge is alive.
+- `POST /v1/events` — `{kind, agent, state, message, choices[], artifact}`
+  → `201` with the full event. `kind` is `status`, `ask`, or `artifact`;
+  `choices` is 0–3 short strings.
+- `GET /v1/device/next?device_id=<id>&after=<event-id>` — next unconsumed
+  event or `204`. With `Accept: text/plain` returns the compact
+  newline-framed view firmware parses: `id, kind, agent, state,
+  choices(|), artifact, message`. A device the bridge has never seen joins
+  at the latest still-open ask instead of replaying history.
+- `POST /v1/device/ack` — `{device_id, event_id}` marks an event consumed
+  for that device so it is never redelivered. `204`.
+- `POST /v1/device/respond` — `{device_id, event_id, choice}` records the
+  answer on an ask and consumes it. Same choice twice is idempotent; a
+  different answer is rejected. `200` with the event.
+- `GET /v1/events/{id}` — the full event, including a recorded `response`.
+- `GET /v1/events` — `{events, open_asks}` listing for `gemmi events`.
+- `DELETE /v1/events` — clears events, consumed marks, and join points.
+  Event ids stay monotonic across restarts so live devices keep working.
+- `GET /health` — liveness.
 
-The current device client polls and holds its most recent event ID in memory.
-Durable acknowledgements, targeted queues, screenshots, and user answers are
-the next protocol increment; they are intentionally not faked in this first
-connection test.
+Asks are consumed only when answered or dismissed on the device, so an
+unanswered ask resurfaces after a device reboot. Status and artifact events
+are consumed as soon as they are displayed.
 
 ## Secure public tunnel (eduroam)
 

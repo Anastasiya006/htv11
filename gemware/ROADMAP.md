@@ -57,6 +57,8 @@ Codex CLI prompts; this is the next design decision.
 - [x] Run a local, durable JSONL-backed broker and ESP32 polling client for the first end-to-end connection.
 - [x] Connect Codex/CLI tooling through explicit `gemmi notify` / `gemmi ask` commands first; evaluate native tool integration only after the protocol is proven.
 - [x] Persist unanswered prompts and decisions so restarts never lose a request or submit an answer twice: per-device consumed sets plus recorded responses live in the same JSONL store, and open asks resurface after a device reboot.
+- [x] Software-first testing: `gemware/bridge/test_bridge.py` (14 HTTP-level tests) and `gemmi sim` run the full ask/answer loop with no ESP32 attached.
+- [x] Device ask flow on hardware: real choices on the dock, press-to-select then press-to-send, answer POSTs retried, `ask --wait` verified end-to-end.
 - [ ] Add agent heartbeats, queue health, backpressure, and a safe offline/USB-disconnected mode.
 
 ### Current bridge status

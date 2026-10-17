@@ -144,11 +144,21 @@ static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
     }
 
     if (touchpad_pressed && touchpad_cnt > 0) {
-        /* mirror_x is inert on this XPT2046 (a left press lands on the right
-         * side), so the X flip is applied here instead. LVGL then rotates the
-         * point by the display's 180. */
-        data->point.x = LCD_H_RES - 1 - touchpad_x[0];
-        data->point.y = touchpad_y[0];
+        /* Calibrated: raw y spans ~35..290 over display y ~298..5, i.e. the
+         * readout compresses toward the middle. Expand it; x reads ~1:1.
+         * The X flip stays manual (mirror_x is inert on this XPT2046), and
+         * LVGL then rotates the point by the display's 180. */
+        int raw_x = touchpad_x[0];
+        int raw_y = touchpad_y[0];
+        /* Same edge compression on x: raw spans ~24..206 across the panel. */
+        int x_px = (raw_x - 24) * (LCD_H_RES - 1) / (206 - 24);
+        if (x_px < 0) x_px = 0;
+        if (x_px > LCD_H_RES - 1) x_px = LCD_H_RES - 1;
+        int y_input = raw_y * 115 / 100 - 19;
+        if (y_input < 0) y_input = 0;
+        if (y_input > LCD_V_RES - 1) y_input = LCD_V_RES - 1;
+        data->point.x = LCD_H_RES - 1 - x_px;
+        data->point.y = y_input;
         data->state = LV_INDEV_STATE_PRESSED;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
@@ -169,6 +179,9 @@ static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
          * on-screen hit lands at (W-1-x, H-1-y). Show that point. */
         lv_obj_set_pos(dot, LCD_H_RES - 1 - data->point.x - 6,
                           LCD_V_RES - 1 - data->point.y - 6);
+        ESP_LOGI(TAG, "touch raw %d,%d -> hit %d,%d",
+                 (int)touchpad_x[0], (int)touchpad_y[0],
+                 LCD_H_RES - 1 - data->point.x, LCD_V_RES - 1 - data->point.y);
         lv_obj_remove_flag(dot, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(dot);
     }

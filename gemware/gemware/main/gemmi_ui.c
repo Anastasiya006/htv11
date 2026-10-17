@@ -775,8 +775,17 @@ static void on_dock(lv_event_t *event)
     case GEMMI_ACTION_VIEW:
         agents_mode = 4;
         select_choice(-1);
+        if (store_button) lv_obj_add_flag(store_button, LV_OBJ_FLAG_HIDDEN);
         set_dock_caption(0, "back"); set_dock_caption(1, ""); set_dock_caption(2, "");
-        if (have_artifact) {
+        if (jpeg_buf) {
+            char status[80];
+            snprintf(status, sizeof(status), "gemmi is viewing %.40s",
+                     last_artifact.artifact[0] ? last_artifact.artifact : last_artifact.agent);
+            set_status(status);
+            show_console(false);
+            lv_obj_remove_flag(jpeg_view, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(jpeg_view);
+        } else if (have_artifact) {
             char status[80];
             snprintf(status, sizeof(status), "gemmi is viewing %.40s",
                      last_artifact.artifact[0] ? last_artifact.artifact : last_artifact.agent);
@@ -1282,7 +1291,7 @@ void gemmi_ui_init(lv_display_t *display)
     status_label = lv_label_create(screen);
     lv_obj_set_pos(status_label, 20, 8);
     lv_obj_set_style_text_font(status_label, UI_MONO, 0);
-    lv_label_set_long_mode(status_label, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(status_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(status_label, lv_color_hex(0xA799B2), 0);
     /* Small diamond status marker to the left of the caption. */
     static const lv_point_precise_t status_diamond[] = {{4,0},{8,4},{4,8},{0,4},{4,0}};

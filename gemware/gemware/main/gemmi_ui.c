@@ -131,6 +131,7 @@ static char last_musing[161];
 static int agents_mode;
 static int detail_agent = -1;
 static int agents_page;
+static void stop_monitor(void);
 
 static uint32_t animation_for_state(const char *state)
 {

@@ -165,7 +165,10 @@ static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
             lv_obj_set_style_border_width(dot, 0, 0);
             lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
         }
-        lv_obj_set_pos(dot, data->point.x - 6, data->point.y - 6);
+        /* LVGL rotates indev points by the display rotation (180), so the
+         * on-screen hit lands at (W-1-x, H-1-y). Show that point. */
+        lv_obj_set_pos(dot, LCD_H_RES - 1 - data->point.x - 6,
+                          LCD_V_RES - 1 - data->point.y - 6);
         lv_obj_remove_flag(dot, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(dot);
     }

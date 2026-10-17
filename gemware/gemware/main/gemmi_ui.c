@@ -93,6 +93,7 @@ static lv_obj_t *pet_badge;
 static lv_obj_t *ask_back;
 
 static lv_obj_t *shop_panel, *shop_feedback, *shop_cards[4], *shop_prices[4];
+static lv_obj_t *store_button;
 static lv_obj_t *shop_previews[4], *shop_names[4], *shop_title;
 static unsigned shop_page;
 static const int shop_catalog[8] = {0, 1, 2, 7, 3, 4, 5, 6};
@@ -304,7 +305,8 @@ static void show_log(bool visible)
 
 static void set_status(const char *status)
 {
-#ifdef GEMMI_SYSTEM_MENLO
+    /* Always map verbose internal states to short top-bar captions — the raw
+     * strings like "watching codex / working" overflow the 90 px label. */
     const char *action = status;
     if (!strncmp(status, "watching ", 9)) {
         const char *separator = strstr(status, " / ");
@@ -324,9 +326,6 @@ static void set_status(const char *status)
     snprintf(caption, sizeof(caption), "%s", action);
     if (caption[0] >= 'a' && caption[0] <= 'z') caption[0] -= 'a' - 'A';
     lv_label_set_text(status_label, caption);
-#else
-    lv_label_set_text(status_label, status);
-#endif
 }
 
 static void set_dock_caption(uint32_t slot, const char *caption)
@@ -379,6 +378,7 @@ static void show_nav_dock(void)
     set_dock_caption(0, "agents");
     set_dock_caption(1, "asks");
     set_dock_caption(2, "view");
+    if (store_button) lv_obj_remove_flag(store_button, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void set_sprite_small(void)
@@ -391,6 +391,7 @@ static void set_sprite_small(void)
 static void enter_agents_list(void)
 {
     agents_mode = 1;
+    if (store_button) lv_obj_add_flag(store_button, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(scene_obj, 250);
     detail_agent = -1;
     set_status(agent_feed_count ? "Agents / pick an agent" : "Agents / none connected");
@@ -592,6 +593,7 @@ static void on_pet(lv_event_t *event)
 static void enter_ask(void)
 {
     pet_mode = 0;
+    if (store_button) lv_obj_add_flag(store_button, LV_OBJ_FLAG_HIDDEN);
     if (shop_panel) lv_obj_add_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
     agents_mode = 0;
     ask_foreground = true;
@@ -1210,28 +1212,33 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_add_flag(queue_label, LV_OBJ_FLAG_HIDDEN);
 
     status_label = lv_label_create(screen);
-    lv_obj_set_pos(status_label, 12, 8);
+    lv_obj_set_pos(status_label, 20, 8);
     lv_obj_set_style_text_font(status_label, UI_MONO, 0);
     lv_label_set_long_mode(status_label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_color(status_label, lv_color_hex(0xA799B2), 0);
-#ifdef GEMMI_SYSTEM_MENLO
-    lv_obj_set_style_text_font(status_label, &gemmi_menlo_8, 0);
-    lv_obj_set_pos(status_label, 20, 8);
-    static const lv_point_precise_t demo_diamond[] = {IP(2,0), IP(4,2), IP(2,4), IP(0,2), IP(2,0)};
-    lv_obj_t *badge_icon = lv_line_create(screen);
-    lv_line_set_points(badge_icon, demo_diamond, 5);
-    lv_obj_set_pos(badge_icon, 12, 11);
-    lv_obj_set_style_line_width(badge_icon, 2, 0);
-    lv_obj_set_style_line_color(badge_icon, lv_color_hex(0xA799B2), 0);
-#endif
+    /* Small round status marker to the left of the caption. */
+    lv_obj_t *badge_icon = lv_obj_create(screen);
+    lv_obj_set_pos(badge_icon, 9, 9);
+    lv_obj_set_size(badge_icon, 8, 8);
+    lv_obj_set_style_radius(badge_icon, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(badge_icon, lv_color_hex(0xA799B2), 0);
+    lv_obj_set_style_border_width(badge_icon, 0, 0);
+    lv_obj_set_style_shadow_width(badge_icon, 0, 0);
     make_label_upright(status_label, 90, 12);
     lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_LEFT, 0);
 
     for (uint32_t index = 0; index < 3; index++) {
-        dock_labels[index] = create_button(screen, 12 + (int16_t)index * 76, SCREEN_H - 34,
-                                           64, 24, (int)index);
+        dock_labels[index] = create_button(screen, 6 + (int16_t)index * 62, SCREEN_H - 34,
+                                           56, 24, (int)index);
         dock_buttons[index] = lv_obj_get_parent(dock_labels[index]);
     }
+    /* Store sits at the bottom-right of the dock row. */
+    store_button = pet_outline(screen, 196, SCREEN_H - 34, 38, 24);
+    lv_obj_set_style_border_color(store_button, lv_color_hex(0x888888), 0);
+    lv_obj_add_flag(store_button, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(store_button, on_shop, LV_EVENT_PRESSED, NULL);
+    lv_obj_t *store_caption = pet_caption(store_button, "shop", 5, 6, 30);
+    lv_obj_set_style_text_align(store_caption, LV_TEXT_ALIGN_CENTER, 0);
     ask_back = pet_outline(screen, 12, 28, 40, 19);
     lv_obj_set_style_border_color(ask_back, lv_color_hex(0x888888), 0);
     lv_obj_add_flag(ask_back, LV_OBJ_FLAG_CLICKABLE);

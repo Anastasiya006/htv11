@@ -1,0 +1,90 @@
+[
+  {
+    "duration" : 7,
+    "file" : "01-fresh-pet.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  },
+  {
+    "duration" : 8,
+    "file" : "02-task-activity.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  },
+  {
+    "duration" : 8,
+    "file" : "03-multiple-agents.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  },
+  {
+    "duration" : 7,
+    "file" : "04-two-choice-question.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  },
+  {
+    "duration" : 7,
+    "file" : "05-question-back-and-reopen.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  },
+  {
+    "duration" : 7,
+    "file" : "06-artifact-and-view.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  },
+  {
+    "duration" : 7,
+    "file" : "07-starter-shop.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  },
+  {
+    "duration" : 9,
+    "file" : "08-shop-themes-and-bow.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  },
+  {
+    "duration" : 6,
+    "file" : "09-crown-and-remove.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  },
+  {
+    "duration" : 5,
+    "file" : "10-level-up.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  },
+  {
+    "duration" : 5,
+    "file" : "11-connectivity.mp4",
+    "fps" : 20,
+    "frame_decoded" : true,
+    "height" : 640,
+    "width" : 480
+  }
+]

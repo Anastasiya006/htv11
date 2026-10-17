@@ -27,3 +27,10 @@ python3 gemware/bridge/test_bridge.py   # bridge behaviour suite (13 tests)
 
 The simulator uses device_id `gemmi-sim` — separate consumption state from the
 real `gemmi-esp32`, so both can be attached to one bridge.
+
+## Visual design context
+
+For native emulator UI work, read [docs/design-context/README.md](docs/design-context/README.md)
+and inspect its contact sheet, screenshots, and videos before changing the design.
+That folder records the accepted minimal main screen and compact shop; the older
+HTML simulator and removed pet stats/care pages are not the current visual target.

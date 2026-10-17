@@ -1204,7 +1204,7 @@ void gemmi_ui_init(lv_display_t *display)
         lv_obj_set_style_border_width(agent_rows[slot], 1, 0);
         lv_obj_set_style_radius(agent_rows[slot], 0, 0);
         lv_obj_t *label = lv_label_create(agent_rows[slot]);
-        lv_obj_set_style_text_color(label, lv_color_hex(0x111111), 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(0x444444), 0);
         lv_obj_set_style_text_font(label, UI_BODY, 0);
         lv_obj_align(label, LV_ALIGN_TOP_LEFT, 6, 1);
         agent_row_states[slot] = lv_label_create(agent_rows[slot]);
@@ -1244,14 +1244,14 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_text_line_space(log_label, 6, 0);
     lv_label_set_long_mode(log_label, LV_LABEL_LONG_CLIP);
     lv_label_set_recolor(log_label, true);
-    lv_obj_set_style_text_color(log_label, lv_color_hex(0x222222), 0);
+    lv_obj_set_style_text_color(log_label, lv_color_hex(0x444444), 0);
 
     musing_label = lv_label_create(scene);
     lv_obj_set_pos(musing_label, 116, 12);
     lv_obj_set_size(musing_label, 108, 84);
     lv_obj_set_style_text_font(musing_label, UI_BODY, 0);
     lv_label_set_long_mode(musing_label, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_color(musing_label, lv_color_hex(0x222222), 0);
+    lv_obj_set_style_text_color(musing_label, lv_color_hex(0x444444), 0);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
 
     gif = lv_gif_create(scene);

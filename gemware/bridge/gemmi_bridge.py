@@ -446,6 +446,23 @@ def submit(args: argparse.Namespace, kind: str) -> int:
     return 2
 
 
+def wait_answer(args: argparse.Namespace) -> int:
+    """Block until a previously posted ask has a recorded response."""
+    deadline = time.monotonic() + args.wait
+    while True:
+        event = bridge_request(args, f"/v1/events/{args.event_id}")
+        if event is None:
+            raise SystemExit(f"Gemmi event #{args.event_id} does not exist.")
+        answer = event.get("response")
+        if answer:
+            print(f"Gemmi answered #{event['id']}: {answer['choice']}")
+            return 0
+        if time.monotonic() >= deadline:
+            print(f"Timed out after {args.wait:g}s waiting for a Gemmi answer to #{args.event_id}.")
+            return 2
+        time.sleep(0.7)
+
+
 def list_events(args: argparse.Namespace) -> int:
     view = bridge_request(args, "/v1/events")
     open_asks = set(view["open_asks"])
@@ -608,6 +625,13 @@ def build_parser() -> argparse.ArgumentParser:
         if kind == "artifact":
             sender.add_argument("--artifact", default="", help="artifact name or URL Gemmi should reference")
         sender.set_defaults(func=lambda parsed, selected=kind: submit(parsed, selected))
+    waiter = subcommands.add_parser("wait", help="block until an ask event is answered")
+    waiter.add_argument("event_id", type=int)
+    waiter.add_argument("--wait", type=float, default=60, metavar="SECONDS")
+    waiter.add_argument("--url", default=DEFAULT_URL, help="bridge URL (or GEMMI_BRIDGE_URL)")
+    waiter.add_argument("--timeout", default=3, type=float)
+    waiter.add_argument("--token-file", default=str(default_token_path()))
+    waiter.set_defaults(func=wait_answer)
     events_parser = subcommands.add_parser("events", help="list queued events and open asks")
     events_parser.add_argument("--url", default=DEFAULT_URL, help="bridge URL (or GEMMI_BRIDGE_URL)")
     events_parser.add_argument("--timeout", default=3, type=float)

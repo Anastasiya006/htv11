@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gemmi — tiny agent UI mockup</title>
+    <style>
+      :root { --ink:#233047; --screen:#f8f4e9; --blue:#78a9ff; --blue2:#d9e7ff; --peach:#ffbe88; --mint:#a9dfba; --line:#cad1dc; --white:#fffefa; }
+      * { box-sizing:border-box; }
+      body { min-height:100vh; margin:0; display:grid; place-items:center; background:#232a38; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--ink); }
+      .shell { display:grid; grid-template-columns:auto 255px; gap:34px; align-items:center; padding:28px; }
+      .bezel { width:min(88vw, 528px); padding:18px; border:8px solid #10151d; border-radius:32px; background:#10151d; box-shadow:0 28px 75px #0009, inset 0 0 0 2px #4c566a; }
+      .notch { width:48px; height:5px; margin:-5px auto 12px; border-radius:4px; background:#384257; }
+      .screen { position:relative; aspect-ratio:3/4; overflow:hidden; border:2px solid #0f1724; background:var(--screen); image-rendering:pixelated; }
+      .top { display:flex; justify-content:space-between; padding:9px; }
+      .corner { width:38px; height:27px; border:2px solid var(--ink); border-radius:7px; color:var(--ink); background:var(--white); font:900 12px ui-monospace,monospace; }
+      .corner.active { background:var(--peach); }
+      .signal { position:absolute; top:16px; left:50%; transform:translateX(-50%); color:#567092; font-size:9px; font-weight:900; white-space:nowrap; }
+      .scene { position:absolute; inset:43px 7px 60px; display:grid; place-items:center; }
+      .sky { position:absolute; inset:0; overflow:hidden; background:linear-gradient(#e9f2ff 0 61%, #d5edcc 61%); }
+      .sky::before { content:""; position:absolute; left:-20%; bottom:26%; width:140%; height:24%; border-radius:50% 50% 0 0; background:#b7dba9; }
+      .sky::after { content:""; position:absolute; right:15%; top:14%; width:8px; height:8px; background:#fff5b6; box-shadow:18px 10px 0 #fff5b6, -23px 17px 0 #fff5b6; }
+      .bubble { z-index:2; position:absolute; top:7px; left:11px; right:11px; min-height:47px; padding:8px 9px; border:2px solid var(--ink); border-radius:8px; background:var(--white); box-shadow:3px 3px 0 #b6c8e4; font-size:10px; font-weight:800; line-height:1.35; }
+      .bubble::after { content:""; position:absolute; left:30px; bottom:-8px; width:12px; height:12px; border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); background:var(--white); transform:rotate(45deg); }
+      .gemmi { z-index:1; width:76%; max-width:184px; margin-top:45px; image-rendering:pixelated; filter:drop-shadow(4px 5px 0 #7388a622); }
+      .tiny-status { z-index:2; position:absolute; right:8px; bottom:7px; padding:4px 5px; border:1px solid #729665; border-radius:5px; color:#466b42; background:#effce9; font-size:8px; font-weight:900; }
+      .dock { position:absolute; right:0; bottom:0; left:0; display:grid; grid-template-columns:repeat(3,1fr); gap:4px; padding:5px; border-top:2px solid var(--ink); background:#dce5f2; }
+      .dock button { min-height:47px; padding:3px; border:2px solid var(--ink); border-radius:7px; color:var(--ink); background:var(--white); font:900 8px ui-monospace,monospace; line-height:1.2; }
+      .dock .icon { display:block; margin-bottom:2px; font-size:17px; line-height:16px; }
+      .dock button:hover, .dock button.selected { background:var(--blue); }
+      .dock .choice-a { background:#bfe6bd; }.dock .choice-b { background:#bdd6ff; }.dock .choice-c { background:#ffd3aa; }
+      .dock.two { grid-template-columns:repeat(3,1fr); }.dock.two button { min-height:39px; }
+      .hidden { display:none; }
+      .notes { color:#e7edf8; }.notes h1 { margin:0 0 12px; font:900 26px/1 ui-monospace,monospace; letter-spacing:-.1em; }.notes p { color:#b6c1d4; font:12px/1.5 ui-monospace,monospace; }.rules { margin-top:20px; padding:0; list-style:none; font-size:11px; }.rules li { margin:9px 0; }.rules b { color:#a9d4ff; }
+      .toast { position:fixed; right:18px; bottom:18px; max-width:270px; padding:11px 13px; border:2px solid #5b79a4; border-radius:8px; color:#edf5ff; background:#18243b; font:11px ui-monospace,monospace; transform:translateY(110px); transition:transform .2s; }.toast.show{transform:translateY(0)}
+      @media(max-width:730px) { .shell{grid-template-columns:1fr;padding:14px}.notes{display:none}.bezel{width:min(96vw,460px)} }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="bezel" aria-label="Gemmi 240 by 320 agent UI mockup">
+        <div class="notch"></div>
+        <div class="screen">
+          <header class="top"><button class="corner" id="top-left" aria-label="Back or agent roster">≡</button><span class="signal" id="signal">● ● ●  3 WORKING</span><button class="corner active" id="top-right" aria-label="Open next request">!</button></header>
+          <section class="scene">
+            <div class="sky"></div>
+            <div class="bubble" id="bubble">hi! 3 agents are working.<br>i'll tap you when needed.</div>
+            <img class="gemmi" id="gemmi" src="../../animations/idle.gif" alt="Gemmi idling">
+            <span class="tiny-status" id="status">quiet queue</span>
+          </section>
+          <nav class="dock" id="dock" aria-label="Gemmi actions">
+            <button data-action="agents"><span class="icon">◉</span>AGENTS</button>
+            <button data-action="inbox"><span class="icon">?</span>ASKS</button>
+            <button data-action="artifact"><span class="icon">▣</span>VIEW</button>
+          </nav>
+        </div>
+      </section>
+      <aside class="notes"><h1>Gemmi is still a pet.</h1><p>The device never becomes a tiny terminal. It only gives you the next thing that needs attention, in language short enough to survive the panel.</p><ul class="rules"><li><b>Top corners:</b> roster / next attention</li><li><b>Bottom row:</b> exactly 3 choices or modes</li><li><b>More choices:</b> page them, never shrink them</li><li><b>Artifacts:</b> one pixel thumbnail, then hand off to a larger screen</li></ul></aside>
+    </main>
+    <div class="toast" id="toast" role="status"></div>
+    <script>
+      const bubble = document.querySelector('#bubble');
+      const dock = document.querySelector('#dock');
+      const status = document.querySelector('#status');
+      const toast = document.querySelector('#toast');
+      const gemmi = document.querySelector('#gemmi');
+      const messages = {
+        home: 'hi! 3 agents are working.<br>i\'ll tap you when needed.',
+        agents: 'ui: drawing screens<br>fw: building bridge<br>rs: needs your pick',
+        artifact: 'ui made a screen.<br>tiny preview here — open it on desktop?',
+        ask: 'research asks:<br>how should agents reach me?'
+      };
+      function say(text) { bubble.innerHTML = text; }
+      function play(name) { gemmi.src = '../../animations/' + name + '.gif?t=' + Date.now(); gemmi.alt = 'Gemmi ' + name; }
+      function notify(text) { toast.textContent = text; toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 2100); }
+      function homeDock() { dock.className = 'dock'; dock.innerHTML = '<button data-action="agents"><span class="icon">◉</span>AGENTS</button><button data-action="inbox"><span class="icon">?</span>ASKS</button><button data-action="artifact"><span class="icon">▣</span>VIEW</button>'; bind(); }
+      function choiceDock() { dock.className = 'dock'; dock.innerHTML = '<button class="choice-a" data-answer="CLI"><span class="icon">A</span>CLI</button><button class="choice-b" data-answer="TOOL"><span class="icon">B</span>TOOL</button><button class="choice-c" data-answer="WEB"><span class="icon">C</span>WEB</button>'; bind(); }
+      function bind() { document.querySelectorAll('#dock button').forEach(btn => btn.addEventListener('click', () => {
+        if (btn.dataset.answer) { say('got it. i told research:<br><b>' + btn.dataset.answer + '</b> first.'); play('success'); status.textContent = 'answer sent'; notify('one answer sent; agents keep working'); setTimeout(() => { homeDock(); play('working'); }, 900); return; }
+        if (btn.dataset.action === 'agents') { say(messages.agents); play('working'); status.textContent = '3 active'; }
+        if (btn.dataset.action === 'artifact') { say(messages.artifact); play('reading'); status.textContent = '1 preview'; notify('in production this hands off the full image to desktop or phone'); }
+        if (btn.dataset.action === 'inbox') { say(messages.ask); play('thinking'); status.textContent = '1 choice'; choiceDock(); }
+      })); }
+      document.querySelector('#top-left').addEventListener('click', () => { say(messages.home); play('idle'); status.textContent = 'quiet queue'; homeDock(); });
+      document.querySelector('#top-right').addEventListener('click', () => { say(messages.ask); play('needs-attention'); status.textContent = '1 choice'; choiceDock(); });
+      bind();
+    </script>
+  </body>
+</html>

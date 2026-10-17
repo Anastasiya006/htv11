@@ -1,6 +1,6 @@
 'use strict';
 const screen=document.getElementById('screen');
-screen.innerHTML='<button id="device-status" title="Open session inspector"><span id="device-signal">○ OFFLINE</span><span id="device-clock"></span></button><button class="pet" aria-label="Pet Gemmi"><img src="../animations/idle.gif" alt="Gemmi"></button><div class="cli-status"><span class="console-label">GEMMI</span><div id="activity" role="status">Waiting for Gemini…</div><button id="image-card" hidden>▧ View image <span id="image-count"></span> ↗</button><button id="response-preview" hidden><span id="response-text"></span><span class="read-more">MORE ↓</span></button></div><section id="response-view" hidden aria-label="Full Gemmi response"><div class="reader-pet"><img src="../animations/reading.gif" alt="Gemmi reading"></div><div class="reader-console"><span class="console-label">GEMMI</span><button id="reader-image" hidden>▧ VIEW IMAGE ↗</button><div id="response-body" tabindex="0"></div><button id="response-back">CLOSE ↑</button></div></section>';
+screen.innerHTML='<button id="device-status" title="Open session inspector"><span id="device-signal">○ offline</span><span id="device-clock"></span></button><button class="pet" aria-label="Pet Gemmi"><img src="../animations/idle.gif" alt="Gemmi"></button><div class="cli-status"><span class="console-label">gemmi</span><div id="activity" role="status">Waiting for Gemini…</div><button id="image-card" hidden>▧ view image <span id="image-count"></span> ↗</button><button id="response-preview" hidden><span id="response-text"></span><span class="read-more">more ↓</span></button></div><section id="response-view" hidden aria-label="Full Gemmi response"><div class="reader-pet"><img src="../animations/reading.gif" alt="Gemmi reading"></div><div class="reader-console"><span class="console-label">gemmi</span><button id="reader-image" hidden>▧ view image ↗</button><div id="response-body" tabindex="0"></div><button id="response-back">close ↑</button></div></section>';
 const imageView=document.createElement('section');imageView.id='image-view';imageView.hidden=true;
 imageView.innerHTML='<header><button id="image-back">‹ BACK</button><span id="image-page"></span><button id="image-zoom">ZOOM +</button></header><div id="image-stage"><img id="screenshot" alt="Agent screenshot"></div><footer><button id="image-prev">←</button><span id="image-name"></span><button id="image-next">→</button></footer><p id="image-error" hidden>Image unavailable.</p>';
 screen.append(imageView);
@@ -57,7 +57,7 @@ window.addEventListener('gemmi-progress',event=>{
 window.addEventListener('gemmi-connection',event=>{
  if(demoMode)return;
  terminalOffline=!event.detail.connected;
- if(terminalOffline){liveProgress=null;clearResponse();reactionUntil=0;latestState={connected:false,animation:'disconnected'};display('disconnected');document.getElementById('device-signal').textContent='○ OFFLINE';activity.textContent='CLI disconnected.';}
+ if(terminalOffline){liveProgress=null;clearResponse();reactionUntil=0;latestState={connected:false,animation:'disconnected'};display('disconnected');document.getElementById('device-signal').textContent='○ offline';activity.textContent='CLI disconnected.';}
 });
 function print(text,response=false){
  if(!text)return;
@@ -103,7 +103,7 @@ function applyState(state){
  const changed=latestState?.eventId!==state.eventId;
  if(changed){idleSince=Date.now();idleBeat=-1;}
  latestState=state;
- document.getElementById('device-signal').textContent=(demoMode?'◇ DEMO':state.connected?'● '+(state.animation||'idle').toUpperCase():'○ OFFLINE');
+ document.getElementById('device-signal').textContent=(demoMode?'◇ demo':state.connected?'● '+(state.animation||'idle'):'○ offline');
  document.getElementById('device-clock').textContent=state.telemetry?.running?Math.floor(state.telemetry.running.duration/1000)+'s':'';
  window.dispatchEvent(new CustomEvent('gemmi-state',{detail:{...state,demo:demoMode}}));
 
@@ -142,7 +142,7 @@ async function update(){
  }catch{
   if(demoMode)return;
   latestState={connected:false,animation:'disconnected'};
-  document.getElementById('device-signal').textContent='○ OFFLINE';
+  document.getElementById('device-signal').textContent='○ offline';
   window.dispatchEvent(new CustomEvent('gemmi-state',{detail:latestState}));
   clearResponse();reactionUntil=0;
   if(lastEvent!=='offline'){lastEvent='offline';print('CLI bridge disconnected.');}

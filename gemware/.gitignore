@@ -5,3 +5,6 @@ gemware/managed_components/
 # Local project configuration may contain Wi-Fi credentials.
 gemware/sdkconfig
 gemware/sdkconfig.old
+
+__pycache__/
+*.pyc

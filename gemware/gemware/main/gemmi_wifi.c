@@ -1,29 +1,19 @@
-/* Gemware Wi-Fi client
-
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
+/* Gemmi Wi-Fi connection, including campus enterprise authentication. */
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
-#include "esp_system.h"
 #include "esp_wifi.h"
+#if CONFIG_GEMMI_WIFI_ENTERPRISE
+#include "esp_eap_client.h"
+#endif
 #include "esp_event.h"
 #include "esp_log.h"
-#include "nvs_flash.h"
+#include "gemmi_wifi.h"
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
-/* The examples use WiFi configuration that you can set via project configuration menu
-
-   If you'd rather not, just change the below entries to strings with
-   the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
-*/
 #define EXAMPLE_ESP_WIFI_SSID      CONFIG_ESP_WIFI_SSID
 #define EXAMPLE_ESP_WIFI_PASS      CONFIG_ESP_WIFI_PASSWORD
 #define EXAMPLE_ESP_MAXIMUM_RETRY  CONFIG_ESP_MAXIMUM_RETRY
@@ -56,21 +46,51 @@
 #define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_WAPI_PSK
 #endif
 
-/* FreeRTOS event group to signal when we are connected*/
+/* Connection lifecycle bits. */
 static EventGroupHandle_t s_wifi_event_group;
 
-/* The event group allows multiple bits for each event, but we only care about two events:
- * - we are connected to the AP with an IP
- * - we failed to connect after the maximum amount of retries */
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
-static const char *TAG = "gemware";
+static const char *TAG = "gemmi_wifi";
 
 static int s_retry_num = 0;
 
-extern void lcd_display_init(void);
+#if CONFIG_GEMMI_WIFI_ENTERPRISE
+static void configure_enterprise_wifi(void)
+{
+    esp_eap_method_t eap_method;
 
+    ESP_ERROR_CHECK(esp_eap_client_set_identity(
+        (const unsigned char *)CONFIG_GEMMI_WIFI_EAP_IDENTITY,
+        strlen(CONFIG_GEMMI_WIFI_EAP_IDENTITY)));
+    ESP_ERROR_CHECK(esp_eap_client_set_username(
+        (const unsigned char *)CONFIG_GEMMI_WIFI_EAP_USERNAME,
+        strlen(CONFIG_GEMMI_WIFI_EAP_USERNAME)));
+    ESP_ERROR_CHECK(esp_eap_client_set_password(
+        (const unsigned char *)CONFIG_GEMMI_WIFI_EAP_PASSWORD,
+        strlen(CONFIG_GEMMI_WIFI_EAP_PASSWORD)));
+
+#if CONFIG_GEMMI_WIFI_EAP_TTLS
+    eap_method = ESP_EAP_TYPE_TTLS;
+#if CONFIG_GEMMI_WIFI_TTLS_PAP
+    ESP_ERROR_CHECK(esp_eap_client_set_ttls_phase2_method(ESP_EAP_TTLS_PHASE2_PAP));
+#else
+    ESP_ERROR_CHECK(esp_eap_client_set_ttls_phase2_method(ESP_EAP_TTLS_PHASE2_MSCHAPV2));
+#endif
+#else
+    eap_method = ESP_EAP_TYPE_PEAP;
+#endif
+
+    /* The ESP-IDF full CA bundle is enabled in sdkconfig. */
+    ESP_ERROR_CHECK(esp_eap_client_use_default_cert_bundle(true));
+    if (strlen(CONFIG_GEMMI_WIFI_EAP_DOMAIN) > 0) {
+        ESP_ERROR_CHECK(esp_eap_client_set_domain_name(CONFIG_GEMMI_WIFI_EAP_DOMAIN));
+    }
+    ESP_ERROR_CHECK(esp_eap_client_set_eap_methods(eap_method));
+    ESP_ERROR_CHECK(esp_wifi_sta_enterprise_enable());
+}
+#endif
 
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
@@ -94,7 +114,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void wifi_init_sta(void)
+void gemmi_wifi_connect(void)
 {
     s_wifi_event_group = xEventGroupCreate();
 
@@ -122,6 +142,7 @@ void wifi_init_sta(void)
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = EXAMPLE_ESP_WIFI_SSID,
+#if !CONFIG_GEMMI_WIFI_ENTERPRISE
             .password = EXAMPLE_ESP_WIFI_PASS,
             /* Authmode threshold resets to WPA2 as default if auth mode threshold equals WIFI_AUTH_OPEN
              * and password matches WPA2 standards (password len => 8).
@@ -135,13 +156,17 @@ void wifi_init_sta(void)
 #ifdef CONFIG_ESP_WIFI_WPA3_COMPATIBLE_SUPPORT
             .disable_wpa3_compatible_mode = 0,
 #endif
+#endif
         },
     };
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
+#if CONFIG_GEMMI_WIFI_ENTERPRISE
+    configure_enterprise_wifi();
+#endif
     ESP_ERROR_CHECK(esp_wifi_start() );
 
-    ESP_LOGI(TAG, "wifi_init_sta finished.");
+    ESP_LOGI(TAG, "station started");
 
     /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
      * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
@@ -160,27 +185,4 @@ void wifi_init_sta(void)
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
-}
-
-void app_main(void)
-{
-    //Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_ERROR_CHECK(nvs_flash_erase());
-      ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-
-    if (CONFIG_LOG_MAXIMUM_LEVEL > CONFIG_LOG_DEFAULT_LEVEL) {
-        /* If you only want to open more logs in the wifi module, you need to make the max level greater than the default level,
-         * and call esp_log_level_set() before esp_wifi_init() to improve the log level of the wifi module. */
-        esp_log_level_set("wifi", CONFIG_LOG_MAXIMUM_LEVEL);
-    }
-
-    ESP_LOGI(TAG, "Initializing LCD display");
-    lcd_display_init();
-
-    ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-    wifi_init_sta();
 }

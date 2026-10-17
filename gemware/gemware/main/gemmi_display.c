@@ -21,7 +21,10 @@
 #include "esp_log.h"
 #include "lvgl.h"
 
-static const char *TAG = "lcd_display";
+#include "gemmi_display.h"
+#include "gemmi_ui.h"
+
+static const char *TAG = "gemmi_display";
 
 // Set to 0 to test the display with the touch controller fully untouched by firmware
 #define ENABLE_TOUCH 1
@@ -30,7 +33,7 @@ static const char *TAG = "lcd_display";
 #define LCD_HOST    SPI2_HOST
 #define TOUCH_HOST  SPI3_HOST
 
-#define LCD_PIXEL_CLOCK_HZ     (20 * 1000 * 1000)
+#define LCD_PIXEL_CLOCK_HZ     (40 * 1000 * 1000)
 #define LCD_BK_LIGHT_ON_LEVEL  1   // flip to 0 if backlight behaves inverted on your board
 #define LCD_BK_LIGHT_OFF_LEVEL !LCD_BK_LIGHT_ON_LEVEL
 
@@ -52,7 +55,7 @@ static const char *TAG = "lcd_display";
 #define LCD_CMD_BITS            8
 #define LCD_PARAM_BITS          8
 
-#define LVGL_DRAW_BUF_LINES     20
+#define LVGL_DRAW_BUF_LINES     40
 #define LVGL_TICK_PERIOD_MS     2
 #define LVGL_TASK_MAX_DELAY_MS  500
 #define LVGL_TASK_MIN_DELAY_MS  (1000 / CONFIG_FREERTOS_HZ)
@@ -60,8 +63,6 @@ static const char *TAG = "lcd_display";
 #define LVGL_TASK_PRIORITY      2
 
 static _lock_t lvgl_api_lock;
-
-extern void example_lvgl_demo_ui(lv_disp_t *disp);
 
 static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
 {
@@ -86,7 +87,9 @@ static void lvgl_port_update_callback(lv_display_t *disp)
         break;
     case LV_DISPLAY_ROTATION_180:
         esp_lcd_panel_swap_xy(panel_handle, false);
-        esp_lcd_panel_mirror(panel_handle, true, true);
+        /* LVGL already renders the full 180 in software; any hardware mirror
+         * here would come out as backwards text. */
+        esp_lcd_panel_mirror(panel_handle, false, false);
         break;
     case LV_DISPLAY_ROTATION_270:
         esp_lcd_panel_swap_xy(panel_handle, true);
@@ -117,8 +120,9 @@ static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
     esp_err_t read_err = esp_lcd_touch_read_data(touch_pad);
     bool touchpad_pressed = esp_lcd_touch_get_coordinates(touch_pad, touchpad_x, touchpad_y, NULL, &touchpad_cnt, 1);
 
-    ESP_LOGI(TAG, "touch poll: read_err=%s pressed=%d cnt=%d x=%d y=%d",
-             esp_err_to_name(read_err), touchpad_pressed, touchpad_cnt, touchpad_x[0], touchpad_y[0]);
+    if (read_err != ESP_OK) {
+        ESP_LOGW(TAG, "touch read failed: %s", esp_err_to_name(read_err));
+    }
 
     if (touchpad_pressed && touchpad_cnt > 0) {
         data->point.x = touchpad_x[0];
@@ -148,9 +152,21 @@ static void lvgl_port_task(void *arg)
     }
 }
 
-void lcd_display_init(void)
+/* The network task uses these around its small UI updates. LVGL itself stays
+ * owned by the display task; this only prevents concurrent object changes. */
+void gemmi_display_lock(void)
 {
-    esp_log_level_set("xpt2046", ESP_LOG_DEBUG);
+    _lock_acquire(&lvgl_api_lock);
+}
+
+void gemmi_display_unlock(void)
+{
+    _lock_release(&lvgl_api_lock);
+}
+
+void gemmi_display_init(void)
+{
+    esp_log_level_set("xpt2046", ESP_LOG_WARN);
 
     ESP_LOGI(TAG, "Turn off LCD backlight");
     gpio_config_t bk_gpio_config = {
@@ -204,6 +220,9 @@ void lcd_display_init(void)
     lv_init();
 
     lv_display_t *display = lv_display_create(LCD_H_RES, LCD_V_RES);
+    /* Rotate the complete canvas in hardware. Do not rotate individual LVGL
+     * objects: the ESP32 software ARGB transform path can panic under redraw. */
+    lv_display_set_rotation(display, LV_DISPLAY_ROTATION_180);
 
     size_t draw_buffer_sz = LCD_H_RES * LVGL_DRAW_BUF_LINES * sizeof(lv_color16_t);
     void *buf1 = spi_bus_dma_memory_alloc(LCD_HOST, draw_buffer_sz, 0);
@@ -254,7 +273,9 @@ void lcd_display_init(void)
         .int_gpio_num = -1,
         .flags = {
             .swap_xy = 0,
-            .mirror_x = 0,
+            /* LVGL rotates indev points by the display rotation (180), so the
+             * touch layer must supply the panel's own 180 to land on identity. */
+            .mirror_x = 1,
             .mirror_y = 1,
         },
     };
@@ -276,6 +297,6 @@ void lcd_display_init(void)
 
     ESP_LOGI(TAG, "Display LVGL demo UI");
     _lock_acquire(&lvgl_api_lock);
-    example_lvgl_demo_ui(display);
+    gemmi_ui_init(display);
     _lock_release(&lvgl_api_lock);
 }

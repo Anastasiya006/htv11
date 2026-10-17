@@ -67,3 +67,116 @@ menu "Example Configuration"
     endchoice
 
 endmenu
+
+menu "Gemmi Wi-Fi"
+
+config GEMMI_WIFI_ENTERPRISE
+    bool "Use WPA2-Enterprise (eduroam)"
+    default n
+    help
+        Use an EAP username and password instead of the normal WPA/WPA2
+        pre-shared-key connection. Leave disabled for ordinary home Wi-Fi.
+
+if GEMMI_WIFI_ENTERPRISE
+
+choice GEMMI_WIFI_EAP_METHOD
+    prompt "EAP method"
+    default GEMMI_WIFI_EAP_PEAP
+    help
+        PEAP with MSCHAPv2 is common on eduroam. Select TTLS only when
+        your institution's eduroam instructions explicitly specify it.
+
+    config GEMMI_WIFI_EAP_PEAP
+        bool "PEAP (usually MSCHAPv2)"
+
+    config GEMMI_WIFI_EAP_TTLS
+        bool "TTLS"
+endchoice
+
+if GEMMI_WIFI_EAP_TTLS
+
+choice GEMMI_WIFI_TTLS_PHASE2
+    prompt "TTLS inner authentication"
+    default GEMMI_WIFI_TTLS_MSCHAPV2
+
+    config GEMMI_WIFI_TTLS_MSCHAPV2
+        bool "MSCHAPv2"
+
+    config GEMMI_WIFI_TTLS_PAP
+        bool "PAP"
+endchoice
+
+endif
+
+config GEMMI_WIFI_EAP_IDENTITY
+    string "Outer identity"
+    default ""
+    help
+        Usually your full eduroam identity, for example username@school.edu.
+        Follow your institution's eduroam instructions exactly.
+
+config GEMMI_WIFI_EAP_USERNAME
+    string "Inner username"
+    default ""
+    help
+        Often the same as the outer identity. Some institutions require only
+        the local username here.
+
+config GEMMI_WIFI_EAP_PASSWORD
+    string "EAP password"
+    default ""
+    help
+        Saved only to this machine's ignored sdkconfig file. Do not commit or
+        share this file.
+
+config GEMMI_WIFI_EAP_DOMAIN
+    string "Server certificate domain (recommended)"
+    default ""
+    help
+        The expected RADIUS server certificate name, when supplied by your
+        institution. Leaving it blank still verifies against the ESP-IDF CA
+        bundle, but pinning the stated domain is stronger.
+
+endif
+
+endmenu
+
+menu "Gemmi bridge"
+
+config GEMMI_BRIDGE_URL
+    string "Computer-side Gemmi bridge URL"
+    default "http://192.168.1.2:8732"
+    help
+        The LAN URL printed by `gemmi serve`. This must be the computer's
+        reachable IPv4 address, not localhost. Configure it before flashing.
+
+config GEMMI_BRIDGE_REQUIRE_TLS
+    bool "Require HTTPS and certificate validation"
+    default n
+    help
+        Enable this for any public tunnel. Gemware will refuse an http:// URL
+        and verifies the server certificate using the ESP-IDF CA bundle.
+
+config GEMMI_BRIDGE_TOKEN
+    string "Bridge access token"
+    default ""
+    help
+        Required for a public tunnel. Keep this secret in the ignored local
+        sdkconfig file. Do not use a short password: use the token generated
+        by `gemmi tunnel init`.
+
+config GEMMI_BRIDGE_REQUIRE_TOKEN
+    bool "Require a bridge access token"
+    default n
+    help
+        Refuse to connect if the bridge token is empty. Enable with any public
+        tunnel so Gemware fails closed after a configuration mistake.
+
+config GEMMI_DEVICE_ID
+    string "Gemmi device identifier"
+    default "gemmi-esp32"
+    help
+        A short name included in device requests. Future bridge versions use
+        this to target queues to a specific device.
+
+endmenu

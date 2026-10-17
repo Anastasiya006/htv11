@@ -37,5 +37,20 @@ target_include_directories(gemmi-emulator PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/compat"
     "${GEMMI_MAIN_DIR}"
 )
-target_link_libraries(gemmi-emulator PRIVATE lvgl::lvgl)
+find_package(SDL2 REQUIRED)
+target_link_libraries(gemmi-emulator PRIVATE lvgl::lvgl SDL2::SDL2)
+
+# Match the HTML simulator's macOS monospace font without distributing Menlo.
+if(APPLE AND EXISTS "/System/Library/Fonts/Menlo.ttc")
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(GEMMI_FONT_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/gemmi_menlo.c")
+    add_custom_command(OUTPUT "${GEMMI_FONT_SOURCE}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/generate_font.py"
+                "/System/Library/Fonts/Menlo.ttc" "${GEMMI_FONT_SOURCE}"
+        DEPENDS generate_font.py VERBATIM)
+    target_sources(gemmi-emulator PRIVATE "${GEMMI_FONT_SOURCE}")
+    target_compile_definitions(gemmi-emulator PRIVATE GEMMI_SYSTEM_MENLO=1)
+    # SDL's LVGL driver omits the Retina flag. Add it at window creation.
+    target_compile_definitions(lvgl PRIVATE SDL_CreateWindow=gemmi_sdl_create_window)
+endif()
 

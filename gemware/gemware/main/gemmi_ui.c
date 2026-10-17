@@ -18,17 +18,41 @@
 #include "gemmi_bridge.h"
 #include "gemmi_ui.h"
 #include "lvgl.h"
+#ifdef GEMMI_SYSTEM_MENLO
+#include "gemmi_ui_scale.h"
+#endif
 
 #define SCREEN_W 240
 #define SCREEN_H 320
-#define TOP_H 35
-#define DOCK_H 42
-#define BUBBLE_X 8
-#define BUBBLE_Y 36
-#define BUBBLE_W (SCREEN_W - 16)
-#define BUBBLE_H 26
-#define MAX_BUBBLE_TEXT 34
+#define TOP_H 24
+#define DOCK_H 38
+#define BUBBLE_X 12
+#define BUBBLE_Y 206
+#define BUBBLE_W (SCREEN_W - 24)
+#define BUBBLE_H 70
+#define MAX_BUBBLE_TEXT 160
 #define AGENT_FEED_LEN 8
+
+/* Match the simulator's small console type without requiring a new font on
+ * an already-configured firmware build. New builds enable these in defaults. */
+#if defined(GEMMI_SYSTEM_MENLO)
+extern const lv_font_t gemmi_menlo_8;
+extern const lv_font_t gemmi_menlo_10;
+extern const lv_font_t gemmi_menlo_12;
+#define UI_MONO (&gemmi_menlo_10)
+#define UI_BODY (&gemmi_menlo_12)
+#else
+#if LV_FONT_UNSCII_8
+#define UI_MONO (&lv_font_unscii_8)
+#else
+#define UI_MONO LV_FONT_DEFAULT
+#endif
+#if LV_FONT_MONTSERRAT_12
+#define UI_BODY (&lv_font_montserrat_12)
+#else
+#define UI_BODY LV_FONT_DEFAULT
+#endif
+#endif
 
 typedef enum {
     GEMMI_ACTION_HOME = 1,
@@ -50,14 +74,20 @@ typedef struct {
 } gemmi_agent_state_t;
 
 static lv_obj_t *gif;
+static lv_obj_t *scene_obj;
 static lv_obj_t *bubble_obj;
 static lv_timer_t *idle_timer;
 static lv_obj_t *headline_label;
 static lv_obj_t *message_label;
 static lv_obj_t *queue_label;
 static lv_obj_t *status_label;
+static lv_obj_t *console_title;
+static lv_obj_t *log_title;
+static lv_obj_t *list_title;
+static lv_obj_t *agent_row_states[4];
 static lv_obj_t *dock_buttons[3];
 static lv_obj_t *dock_labels[3];
+static lv_obj_t *dock_icons[3];
 static uint32_t current_animation = GEMMI_ANIM_IDLE;
 
 static gemmi_event_t pending_ask;
@@ -115,9 +145,9 @@ static void make_label_upright(lv_obj_t *label, int16_t width, int16_t height)
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 }
 
-#define SCENE_W 226
-#define SCENE_H 238
-#define GIF_SIZE 196
+#define SCENE_W 240
+#define SCENE_H 178
+#define GIF_SIZE 168
 
 /* Sprite placement: 0 = big centred, 1 = corner badge, 2 = detail left. */
 static int sprite_mode;
@@ -128,11 +158,15 @@ static void apply_sprite_mode(void)
     if (sprite_mode == 1) {
         lv_obj_set_size(gif, 44, 44);
         lv_image_set_scale(gif, 44 * 256 / 96);
-        lv_obj_align(gif, LV_ALIGN_TOP_LEFT, 4, 4);
+        lv_obj_align(gif, LV_ALIGN_TOP_RIGHT, -16, 4);
     } else if (sprite_mode == 2) {
         lv_obj_set_size(gif, 96, 96);
         lv_image_set_scale(gif, 256);
-        lv_obj_align(gif, LV_ALIGN_TOP_LEFT, 4, 40);
+        lv_obj_align(gif, LV_ALIGN_TOP_LEFT, 12, 4);
+    } else if (sprite_mode == 3) {
+        lv_obj_set_size(gif, 96, 96);
+        lv_image_set_scale(gif, 256);
+        lv_obj_align(gif, LV_ALIGN_TOP_MID, 0, 10);
     } else {
         lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
         lv_image_set_scale(gif, GIF_SIZE * 256 / 96);
@@ -165,6 +199,7 @@ static void recreate_gif(const void *dsc)
         ESP_LOGW(TAG, "gif init failed, free heap %u",
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
     }
+    lv_image_set_antialias(gif, false);
     apply_sprite_mode();
 }
 
@@ -216,19 +251,82 @@ static void set_bubble(const char *headline, const char *message, const char *qu
     char compact_message[MAX_BUBBLE_TEXT + 1];
     trim_for_bubble(message, compact_message, sizeof(compact_message));
     lv_label_set_text(headline_label, headline);
+    lv_label_set_text(console_title, "Gemmi");
     lv_label_set_text(message_label, compact_message);
     lv_label_set_text(queue_label, queue);
 }
 
+/* Titles are siblings of the frame so the renderer never clips their
+ * upper pixels at the frame edge. Keep their visibility coupled. */
+static void show_console(bool visible)
+{
+    if (visible) {
+        lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(console_title, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(console_title, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void show_log(bool visible)
+{
+    if (visible) {
+        lv_obj_remove_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(log_title, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(log_title, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void set_status(const char *status)
 {
+#ifdef GEMMI_SYSTEM_MENLO
+    const char *action = status;
+    if (!strncmp(status, "watching ", 9)) {
+        const char *separator = strstr(status, " / ");
+        if (separator) action = separator + 3;
+    } else if (!strcmp(status, "gemmi is thinking")) action = "Thinking";
+    else if (!strncmp(status, "answer ", 7) || !strcmp(status, "gemmi needs an answer")) action = "Needs input";
+    else if (!strncmp(status, "again to send:", 14)) action = "Confirm choice";
+    else if (!strncmp(status, "gemmi sent:", 11)) action = "Answered";
+    else if (!strncmp(status, "gemmi is viewing", 16)) action = "Viewing image";
+    else if (!strncmp(status, "Agents /", 8)) action = "Agents";
+    else if (!strncmp(status, "offline", 7)) action = "Disconnected";
+    else if (!strcmp(status, "gemmi is back online")) action = "Connected";
+    else if (!strcmp(status, "gemmi checked - no asks")) action = "No pending asks";
+    else if (!strcmp(status, "gemmi found no artifact")) action = "No image yet";
+    if (!strcmp(action, "needs-attention")) action = "Needs input";
+    char caption[64];
+    snprintf(caption, sizeof(caption), "%s", action);
+    if (caption[0] >= 'a' && caption[0] <= 'z') caption[0] -= 'a' - 'A';
+    lv_label_set_text(status_label, caption);
+#else
     lv_label_set_text(status_label, status);
+#endif
 }
 
 static void set_dock_caption(uint32_t slot, const char *caption)
 {
     if (slot >= 3) return;
-    lv_label_set_text(dock_labels[slot], caption);
+    char display_caption[64];
+    snprintf(display_caption, sizeof(display_caption), "%s", caption);
+    if (display_caption[0] >= 'a' && display_caption[0] <= 'z') display_caption[0] -= 'a' - 'A';
+    lv_label_set_text(dock_labels[slot], display_caption);
+    bool with_icon = !strcmp(caption, "agents") || !strcmp(caption, "asks") || !strcmp(caption, "view");
+    if (with_icon) {
+        lv_point_t text_size;
+        lv_text_get_size(&text_size, display_caption, UI_MONO, 0, 0, 100, LV_TEXT_FLAG_NONE);
+        lv_obj_set_size(dock_labels[slot], text_size.x + 1, 14);
+        lv_obj_align(dock_labels[slot], LV_ALIGN_CENTER, 6, 0);
+        lv_obj_align(dock_icons[slot], LV_ALIGN_CENTER, -(text_size.x + 4) / 2, -1);
+        lv_obj_remove_flag(dock_icons[slot], LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_set_size(dock_labels[slot], 54, 14);
+        lv_obj_center(dock_labels[slot]);
+        lv_obj_add_flag(dock_icons[slot], LV_OBJ_FLAG_HIDDEN);
+    }
     /* An empty caption would leave a dead button on screen. */
     if (caption[0] == '\0') {
         lv_obj_add_flag(dock_buttons[slot], LV_OBJ_FLAG_HIDDEN);
@@ -245,7 +343,7 @@ static void select_choice(int slot)
          * caption colour is driven by hand to match the inverted fill. */
         if ((int)index == slot) {
             lv_obj_add_state(dock_buttons[index], LV_STATE_CHECKED);
-            lv_obj_set_style_text_color(dock_labels[index], lv_color_hex(0x5AC8FF), 0);
+            lv_obj_set_style_text_color(dock_labels[index], lv_color_hex(0x444444), 0);
         } else {
             lv_obj_remove_state(dock_buttons[index], LV_STATE_CHECKED);
             lv_obj_set_style_text_color(dock_labels[index], lv_color_hex(0x111111), 0);
@@ -271,19 +369,23 @@ static void set_sprite_small(void)
 static void enter_agents_list(void)
 {
     agents_mode = 1;
+    lv_obj_set_height(scene_obj, 250);
     detail_agent = -1;
-    set_status(agent_feed_count ? "gemmi: pick an agent" : "gemmi sees no agents");
-    lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
+    set_status(agent_feed_count ? "Agents / pick an agent" : "Agents / none connected");
+    lv_obj_add_flag(console_title, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(list_title, LV_OBJ_FLAG_HIDDEN);
+    show_console(false);
+    show_log(false);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
     set_sprite_small();
     for (uint32_t row = 0; row < AGENT_ROWS; row++) {
         int agent = agents_page * AGENT_ROWS + (int)row;
         if (agent < agent_feed_count) {
             char caption[40];
-            snprintf(caption, sizeof(caption), "%d %.24s", agent + 1,
+            snprintf(caption, sizeof(caption), "%02d  %.24s", agent + 1,
                      agent_feed[agent].agent);
             lv_label_set_text(lv_obj_get_child(agent_rows[row], 0), caption);
+            lv_label_set_text(agent_row_states[row], agent_feed[agent].state);
             lv_obj_remove_flag(agent_rows[row], LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(agent_rows[row], LV_OBJ_FLAG_HIDDEN);
@@ -297,11 +399,13 @@ static void enter_agents_list(void)
 static void show_agent_detail(void)
 {
     agents_mode = 2;
+    lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
+
     const gemmi_agent_state_t *entry = &agent_feed[detail_agent];
     char status[80];
-    snprintf(status, sizeof(status), "watching %s · %s", entry->agent, entry->state);
+    snprintf(status, sizeof(status), "watching %s / %s", entry->agent, entry->state);
     set_status(status);
-    lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+    show_console(false);
     for (uint32_t slot = 0; slot < AGENT_ROWS; slot++) {
         lv_obj_add_flag(agent_rows[slot], LV_OBJ_FLAG_HIDDEN);
     }
@@ -333,7 +437,7 @@ static void show_agent_detail(void)
     }
     if (shown == 0) strlcpy(text, "no log yet\n", sizeof(text));
     lv_label_set_text(log_label, text);
-    lv_obj_remove_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
+    show_log(true);
     set_dock_caption(0, "back");
     set_dock_caption(1, "next");
     set_dock_caption(2, "");
@@ -349,7 +453,14 @@ static void show_home(void)
 {
     ask_foreground = false;
     agents_mode = 0;
-    lv_obj_add_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_height(scene_obj, SCENE_H);
+    lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(console_title, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(console_title, 20, BUBBLE_Y - 5);
+    lv_obj_set_pos(bubble_obj, BUBBLE_X, BUBBLE_Y);
+    lv_obj_set_size(bubble_obj, BUBBLE_W, BUBBLE_H);
+    lv_obj_set_size(message_label, BUBBLE_W - 20, 34);
+    show_log(false);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
     for (uint32_t slot = 0; slot < AGENT_ROWS; slot++) {
         lv_obj_add_flag(agent_rows[slot], LV_OBJ_FLAG_HIDDEN);
@@ -359,10 +470,11 @@ static void show_home(void)
     if (ask_pending) {
         set_status("gemmi needs an answer");
         set_bubble("ask waiting", pending_ask.message, "1 ask");
-        lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+        show_console(true);
     } else {
-        set_status("gemmi is idle");
-        lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+        set_status("Idle");
+        set_bubble("gemmi", "Ready when you are.", "");
+        show_console(true);
     }
     show_nav_dock();
     play_state("idle", false);
@@ -371,10 +483,29 @@ static void show_home(void)
 static void enter_ask(void)
 {
     ask_foreground = true;
+    lv_obj_set_height(scene_obj, 124);
+    lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
+    show_log(false);
+    lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
+    for (int row = 0; row < AGENT_ROWS; row++) lv_obj_add_flag(agent_rows[row], LV_OBJ_FLAG_HIDDEN);
+    sprite_mode = 3;
+    apply_sprite_mode();
+    lv_point_t question_size;
+    lv_text_get_size(&question_size, pending_ask.message, UI_BODY, 0, 4,
+                     BUBBLE_W - 20, LV_TEXT_FLAG_NONE);
+    int question_height = question_size.y + 34;
+    if (question_height < BUBBLE_H) question_height = BUBBLE_H;
+    if (question_height > 126) question_height = 126;
+    int question_y = 276 - question_height;
+    lv_obj_set_pos(bubble_obj, BUBBLE_X, question_y);
+    lv_obj_set_size(bubble_obj, BUBBLE_W, question_height);
+    lv_obj_set_size(message_label, BUBBLE_W - 20, question_height - 28);
+    lv_obj_set_pos(console_title, 20, question_y - 5);
+    lv_obj_remove_flag(console_title, LV_OBJ_FLAG_HIDDEN);
     char status[80];
     snprintf(status, sizeof(status), "answer %s", pending_ask.agent);
     set_status(status);
-    lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+    show_console(true);
     set_bubble("ask", pending_ask.message, "pick one");
     select_choice(-1);
     for (uint32_t slot = 0; slot < 3; slot++) {
@@ -403,10 +534,16 @@ static void send_choice(int slot)
     gemmi_bridge_answer(pending_ask.id, choice);
     ask_pending = false;
     ask_foreground = false;
+    set_sprite_home();
+    lv_obj_set_height(scene_obj, SCENE_H);
+    lv_obj_set_pos(bubble_obj, BUBBLE_X, BUBBLE_Y);
+    lv_obj_set_size(bubble_obj, BUBBLE_W, BUBBLE_H);
+    lv_obj_set_size(message_label, BUBBLE_W - 20, 34);
+    lv_obj_set_pos(console_title, 20, BUBBLE_Y - 5);
     char status[80];
     snprintf(status, sizeof(status), "gemmi sent: %s", choice);
     set_status(status);
-    lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+    show_console(true);
     set_bubble("answered", pending_ask.message, "done");
     show_nav_dock();
     play_state("success", true);
@@ -457,7 +594,7 @@ static void on_dock(lv_event_t *event)
             enter_ask();
         } else {
             set_status("gemmi checked - no asks");
-            lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+            show_console(false);
             play_state("thinking", true);
         }
         break;
@@ -467,10 +604,10 @@ static void on_dock(lv_event_t *event)
             snprintf(status, sizeof(status), "gemmi is viewing %.40s",
                      last_artifact.artifact[0] ? last_artifact.artifact : last_artifact.agent);
             set_status(status);
-            lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+            show_console(false);
         } else {
             set_status("gemmi found no artifact");
-            lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+            show_console(false);
         }
         play_state("reading", true);
         break;
@@ -501,6 +638,31 @@ static void on_bubble(lv_event_t *event)
     }
 }
 
+/* Compact line icons: rasterize directly on the desktop pixel grid. */
+#ifdef GEMMI_SYSTEM_MENLO
+#define ICON_PX(x) ((x) * 3)
+#define ICON_STROKE 2
+#else
+#define ICON_PX(x) ((x) * 3 / 4)
+#define ICON_STROKE 1
+#endif
+#define IP(x,y) {ICON_PX(x), ICON_PX(y)}
+static const lv_point_precise_t person_head[] = {IP(4,1),IP(6,0),IP(8,1),IP(9,3),IP(8,5),IP(6,6),IP(4,5),IP(3,3),IP(4,1)};
+static const lv_point_precise_t person_body[] = {IP(1,12),IP(1,10),IP(2,8),IP(4,7),IP(8,7),IP(10,8),IP(11,10),IP(11,12)};
+static const lv_point_precise_t speech[] = {IP(2,1),IP(10,1),IP(11,2),IP(11,8),IP(10,9),IP(6,9),IP(2,12),IP(2,9),IP(1,8),IP(1,2),IP(2,1)};
+static const lv_point_precise_t speech_text[] = {IP(4,5),IP(8,5)};
+static const lv_point_precise_t picture[] = {IP(2,1),IP(10,1),IP(11,2),IP(11,10),IP(10,11),IP(2,11),IP(1,10),IP(1,2),IP(2,1)};
+static const lv_point_precise_t mountains[] = {IP(1,9),IP(5,5),IP(8,8),IP(10,6),IP(11,7)};
+static void icon_line(lv_obj_t *parent, const lv_point_precise_t *points, uint32_t count)
+{
+    lv_obj_t *line = lv_line_create(parent);
+    lv_line_set_points(line, points, count);
+    lv_obj_set_style_line_width(line, ICON_STROKE, 0);
+    lv_obj_set_style_line_color(line, lv_color_hex(0x444444), 0);
+    lv_obj_set_style_line_rounded(line, false, 0);
+    lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
+}
+
 static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t width, int16_t height,
                                int slot)
 {
@@ -508,24 +670,43 @@ static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t w
     lv_obj_set_pos(button, x, y);
     lv_obj_set_size(button, width, height);
     lv_obj_set_style_bg_color(button, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_border_color(button, lv_color_hex(0x111111), 0);
+    lv_obj_set_style_border_color(button, lv_color_hex(0x888888), 0);
     lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_pad_all(button, 3, 0);
     lv_obj_set_style_radius(button, 0, 0);
     lv_obj_set_style_shadow_width(button, 0, 0);
-    /* While held the button is grey so the caption stays readable; a selected
-     * (checked) choice is solid black. Label colour for checked is driven in
-     * select_choice because state styles never reach child labels. */
-    lv_obj_set_style_bg_color(button, lv_color_hex(0xBBBBBB), LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x111111), LV_STATE_CHECKED);
+    /* Match the console frame with square grey outlines. */
+    lv_obj_set_style_border_color(button, lv_color_hex(0x444444), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(button, lv_color_hex(0x444444), LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0xEEEEEE), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0xEEEEEE), LV_STATE_CHECKED);
     /* Resistive touch often loses the release position, and CLICKED needs a
      * clean press+release inside the widget. PRESSED fires on touch-down. */
     lv_obj_add_event_cb(button, on_dock, LV_EVENT_PRESSED, (void *)(uintptr_t)slot);
 
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_color(label, lv_color_hex(0x111111), 0);
-    make_label_upright(label, width - 6, height - 6);
+    lv_obj_set_style_text_color(label, lv_color_hex(0x777777), 0);
+    lv_obj_set_style_text_font(label, UI_MONO, 0);
+    make_label_upright(label, width - 10, 14);
     lv_obj_center(label);
+    lv_obj_t *icon = dock_icons[slot] = lv_obj_create(button);
+    lv_obj_set_size(icon, 9, 9);
+    lv_obj_set_style_pad_all(icon, 0, 0);
+    lv_obj_set_style_border_width(icon, 0, 0);
+    lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
+    lv_obj_remove_flag(icon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(icon, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    if (slot == 0) {
+        icon_line(icon, person_head, 9);
+        icon_line(icon, person_body, 8);
+    } else if (slot == 1) {
+        icon_line(icon, speech, 11);
+        icon_line(icon, speech_text, 2);
+    } else {
+        icon_line(icon, picture, 9);
+        icon_line(icon, mountains, 5);
+    }
     return label;
 }
 
@@ -536,30 +717,44 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
 
     /* Flat black-and-white UI keeps the panel clean; Gemmi is the only colour. */
-    lv_obj_t *scene = lv_obj_create(screen);
-    lv_obj_set_pos(scene, 7, TOP_H + 3);
-    lv_obj_set_size(scene, SCREEN_W - 14, SCREEN_H - TOP_H - DOCK_H - 5);
+    lv_obj_t *scene = scene_obj = lv_obj_create(screen);
+    lv_obj_set_pos(scene, 0, TOP_H);
+    lv_obj_set_size(scene, SCENE_W, SCENE_H);
     lv_obj_set_style_bg_color(scene, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_color(scene, lv_color_hex(0x111111), 0);
-    lv_obj_set_style_border_width(scene, 1, 0);
+    lv_obj_set_style_border_width(scene, 0, 0);
     lv_obj_set_style_radius(scene, 0, 0);
     lv_obj_set_style_pad_all(scene, 0, 0);
     lv_obj_set_scrollable(scene, false);
 
     /* Agent list rows, one tappable numbered row per active agent. They sit
      * below the sprite badge so nothing overlaps. */
+    list_title = lv_label_create(scene);
+    lv_obj_set_pos(list_title, 12, 16);
+    lv_obj_set_style_text_font(list_title, UI_MONO, 0);
+    lv_obj_set_style_text_color(list_title, lv_color_hex(0x777777), 0);
+    lv_label_set_text(list_title, "Your agents");
+    lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
     for (int slot = 0; slot < AGENT_ROWS; slot++) {
         agent_rows[slot] = lv_button_create(scene);
-        lv_obj_set_pos(agent_rows[slot], 10, 52 + slot * 38);
-        lv_obj_set_size(agent_rows[slot], SCENE_W - 20, 32);
+        lv_obj_set_pos(agent_rows[slot], 12, 58 + slot * 38);
+        lv_obj_set_size(agent_rows[slot], SCENE_W - 24, 35);
         lv_obj_set_style_bg_color(agent_rows[slot], lv_color_hex(0xFFFFFF), 0);
-        lv_obj_set_style_bg_color(agent_rows[slot], lv_color_hex(0xBBBBBB), LV_STATE_PRESSED);
-        lv_obj_set_style_border_color(agent_rows[slot], lv_color_hex(0x111111), 0);
+        lv_obj_set_style_bg_color(agent_rows[slot], lv_color_hex(0xF1EDF5), LV_STATE_PRESSED);
+        lv_obj_set_style_border_color(agent_rows[slot], lv_color_hex(0xEAEAEA), 0);
+        lv_obj_set_style_border_side(agent_rows[slot], LV_BORDER_SIDE_BOTTOM, 0);
+        lv_obj_set_style_pad_all(agent_rows[slot], 0, 0);
+        lv_obj_set_style_shadow_width(agent_rows[slot], 0, 0);
         lv_obj_set_style_border_width(agent_rows[slot], 1, 0);
-        lv_obj_set_style_radius(agent_rows[slot], 8, 0);
+        lv_obj_set_style_radius(agent_rows[slot], 0, 0);
         lv_obj_t *label = lv_label_create(agent_rows[slot]);
         lv_obj_set_style_text_color(label, lv_color_hex(0x111111), 0);
-        lv_obj_center(label);
+        lv_obj_set_style_text_font(label, UI_BODY, 0);
+        lv_obj_align(label, LV_ALIGN_TOP_LEFT, 6, 1);
+        agent_row_states[slot] = lv_label_create(agent_rows[slot]);
+        lv_obj_set_style_text_font(agent_row_states[slot], UI_MONO, 0);
+        lv_obj_set_style_text_color(agent_row_states[slot], lv_color_hex(0x999999), 0);
+        lv_obj_align(agent_row_states[slot], LV_ALIGN_BOTTOM_LEFT, 6, -3);
         lv_obj_add_flag(agent_rows[slot], LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_event_cb(agent_rows[slot], on_agent_row, LV_EVENT_PRESSED,
                             (void *)(uintptr_t)slot);
@@ -567,30 +762,44 @@ void gemmi_ui_init(lv_display_t *display)
 
     /* Per-agent log view on the right of the scene while drilled in; the
      * sprite shrinks to the left beside a thought caption. */
-    log_panel = lv_obj_create(scene);
-    lv_obj_set_pos(log_panel, 104, 8);
-    lv_obj_set_size(log_panel, SCENE_W - 108, SCENE_H - 16);
+    log_panel = lv_obj_create(screen);
+    lv_obj_set_pos(log_panel, 12, 138);
+    lv_obj_set_size(log_panel, SCREEN_W - 24, 138);
     lv_obj_set_style_bg_color(log_panel, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_border_color(log_panel, lv_color_hex(0x111111), 0);
+    lv_obj_set_style_border_color(log_panel, lv_color_hex(0x888888), 0);
     lv_obj_set_style_border_width(log_panel, 1, 0);
     lv_obj_set_style_radius(log_panel, 0, 0);
-    lv_obj_set_style_pad_all(log_panel, 6, 0);
+    lv_obj_set_style_pad_all(log_panel, 10, 0);
     lv_obj_set_scrollable(log_panel, false);
     lv_obj_add_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(log_panel, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    log_title = lv_label_create(screen);
+    lv_label_set_text(log_title, "Agent log");
+    lv_obj_set_pos(log_title, 20, 133);
+    lv_obj_add_flag(log_title, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_text_font(log_title, UI_MONO, 0);
+    lv_obj_set_style_text_color(log_title, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_bg_color(log_title, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(log_title, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_hor(log_title, 4, 0);
     log_label = lv_label_create(log_panel);
-    lv_obj_set_size(log_label, SCENE_W - 120, SCENE_H - 28);
+    lv_obj_set_size(log_label, SCREEN_W - 46, 116);
+    lv_obj_set_style_text_font(log_label, UI_MONO, 0);
+    lv_obj_set_style_text_line_space(log_label, 6, 0);
     lv_label_set_long_mode(log_label, LV_LABEL_LONG_CLIP);
     lv_label_set_recolor(log_label, true);
     lv_obj_set_style_text_color(log_label, lv_color_hex(0x222222), 0);
 
     musing_label = lv_label_create(scene);
-    lv_obj_set_pos(musing_label, 4, 140);
-    lv_obj_set_size(musing_label, 96, 96);
+    lv_obj_set_pos(musing_label, 116, 12);
+    lv_obj_set_size(musing_label, 108, 84);
+    lv_obj_set_style_text_font(musing_label, UI_BODY, 0);
     lv_label_set_long_mode(musing_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(musing_label, lv_color_hex(0x222222), 0);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
 
     gif = lv_gif_create(scene);
+    lv_image_set_antialias(gif, false);
     lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
     lv_gif_set_src(gif, gemmi_anims[GEMMI_ANIM_IDLE].dsc);
     /* Frames are native 96 px; scale the image up so the sprite fills the
@@ -602,7 +811,7 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_pos(bubble, BUBBLE_X, BUBBLE_Y);
     lv_obj_set_size(bubble, BUBBLE_W, BUBBLE_H);
     lv_obj_set_style_bg_color(bubble, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_border_color(bubble, lv_color_hex(0x111111), 0);
+    lv_obj_set_style_border_color(bubble, lv_color_hex(0x888888), 0);
     lv_obj_set_style_border_width(bubble, 1, 0);
     lv_obj_set_style_radius(bubble, 0, 0);
     lv_obj_set_style_pad_all(bubble, 0, 0);
@@ -613,26 +822,53 @@ void gemmi_ui_init(lv_display_t *display)
     headline_label = lv_label_create(bubble);
     lv_obj_add_flag(headline_label, LV_OBJ_FLAG_HIDDEN);
 
+    lv_obj_add_flag(bubble, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    console_title = lv_label_create(screen);
+    lv_label_set_text(console_title, "Gemmi");
+    lv_obj_set_pos(console_title, 20, BUBBLE_Y - 5);
+    lv_obj_set_style_text_font(console_title, UI_MONO, 0);
+    lv_obj_set_style_text_color(console_title, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_bg_color(console_title, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(console_title, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_hor(console_title, 4, 0);
     message_label = lv_label_create(bubble);
-    lv_obj_set_pos(message_label, 5, 3);
-    lv_label_set_long_mode(message_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_pos(message_label, 9, 13);
+    lv_label_set_long_mode(message_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(message_label, UI_BODY, 0);
+    lv_obj_set_style_text_line_space(message_label, 4, 0);
     lv_obj_set_style_text_color(message_label, lv_color_hex(0x444444), 0);
-    make_label_upright(message_label, BUBBLE_W - 10, 20);
+    make_label_upright(message_label, BUBBLE_W - 20, 34);
+    lv_obj_set_style_text_align(message_label, LV_TEXT_ALIGN_LEFT, 0);
 
-    queue_label = lv_label_create(screen);
+    queue_label = lv_label_create(bubble);
+    lv_obj_set_style_text_font(queue_label, UI_MONO, 0);
+    lv_obj_set_style_text_color(queue_label, lv_color_hex(0x999999), 0);
+    lv_obj_align(queue_label, LV_ALIGN_BOTTOM_RIGHT, -9, -7);
     /* Keep the character's full 2x sprite unobstructed. The queue state is
      * represented by the top status and three fixed bottom controls instead. */
     lv_obj_add_flag(queue_label, LV_OBJ_FLAG_HIDDEN);
 
     status_label = lv_label_create(screen);
-    lv_obj_set_pos(status_label, 8, 3);
-    lv_label_set_long_mode(status_label, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_color(status_label, lv_color_hex(0x333333), 0);
-    make_label_upright(status_label, SCREEN_W - 16, 24);
+    lv_obj_set_pos(status_label, 12, 8);
+    lv_obj_set_style_text_font(status_label, UI_MONO, 0);
+    lv_label_set_long_mode(status_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_color(status_label, lv_color_hex(0xA799B2), 0);
+#ifdef GEMMI_SYSTEM_MENLO
+    lv_obj_set_style_text_font(status_label, &gemmi_menlo_8, 0);
+    lv_obj_set_pos(status_label, 20, 8);
+    static const lv_point_precise_t demo_diamond[] = {IP(2,0), IP(4,2), IP(2,4), IP(0,2), IP(2,0)};
+    lv_obj_t *badge_icon = lv_line_create(screen);
+    lv_line_set_points(badge_icon, demo_diamond, 5);
+    lv_obj_set_pos(badge_icon, 12, 11);
+    lv_obj_set_style_line_width(badge_icon, 2, 0);
+    lv_obj_set_style_line_color(badge_icon, lv_color_hex(0xA799B2), 0);
+#endif
+    make_label_upright(status_label, SCREEN_W - 24, 12);
+    lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_LEFT, 0);
 
     for (uint32_t index = 0; index < 3; index++) {
-        dock_labels[index] = create_button(screen, 5 + (int16_t)index * 78, SCREEN_H - 35,
-                                           74, 30, (int)index);
+        dock_labels[index] = create_button(screen, 12 + (int16_t)index * 76, SCREEN_H - 34,
+                                           64, 24, (int)index);
         dock_buttons[index] = lv_obj_get_parent(dock_labels[index]);
     }
     show_home();
@@ -700,7 +936,7 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
                  event->artifact[0] ? event->artifact : event->agent);
         set_status(status);
         if (!ask_foreground) {
-            lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+            show_console(true);
             set_bubble("artifact",
                        event->artifact[0] ? event->artifact : event->message, "preview");
         }
@@ -713,13 +949,13 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
     if (strcmp(event->state, "thinking") == 0) {
         snprintf(status, sizeof(status), "gemmi is thinking");
     } else {
-        snprintf(status, sizeof(status), "watching %s · %s", event->agent, event->state);
+        snprintf(status, sizeof(status), "watching %s / %s", event->agent, event->state);
     }
     set_status(status);
     if (!ask_foreground && !ask_pending) {
         char headline[80];
-        snprintf(headline, sizeof(headline), "%s · %s", event->agent, event->state);
-        lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+        snprintf(headline, sizeof(headline), "%s / %s", event->agent, event->state);
+        show_console(true);
         set_bubble(headline, event->message, "attention needed");
     }
     play_state(event->state, false);

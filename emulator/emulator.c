@@ -7,13 +7,27 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <SDL2/SDL.h>
+#include <SDL.h>
 #include "gemmi_bridge.h"
 #include "gemmi_ui.h"
 #include "lvgl.h"
 
+#ifdef GEMMI_SYSTEM_MENLO
+#define GEMMI_RENDER_SCALE 4
+#else
+#define GEMMI_RENDER_SCALE 1
+#endif
+
 #define SCREEN_W 240
 #define SCREEN_H 320
+
+#ifdef __APPLE__
+SDL_Window *gemmi_sdl_create_window(const char *title, int x, int y,
+                                   int width, int height, Uint32 flags)
+{
+    return SDL_CreateWindow(title, x, y, width, height, flags | SDL_WINDOW_ALLOW_HIGHDPI);
+}
+#endif
 
 static void copy_text(char *destination, size_t destination_size, const char *source)
 {
@@ -106,28 +120,33 @@ void gemmi_bridge_answer(int event_id, const char *choice)
 static void print_usage(const char *program)
 {
     printf("Usage: %s [--scene home|thinking|working|ask|artifact|agents|offline]\n"
-           "Hotkeys: 1 thinking, 2 working, 3 ask, 4 artifact, 5 agents, O offline, I online\n",
+           "Hotkeys: 1 thinking, 2 working, 3 ask, 4 artifact, 5 agents, O offline, I online\nCapture: --capture path.bmp [--tap x,y ...] (logical coordinates)\n",
            program);
 }
 
 int main(int argc, char **argv)
 {
     const char *scene = "agents";
-    if (argc == 3 && strcmp(argv[1], "--scene") == 0) {
-        scene = argv[2];
-    } else if (argc != 1) {
-        print_usage(argv[0]);
-        return argc == 2 && strcmp(argv[1], "--help") == 0 ? 0 : 2;
+    const char *capture = NULL;
+    int tap_x[8], tap_y[8], tap_count = 0;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--scene") && i + 1 < argc) scene = argv[++i];
+        else if (!strcmp(argv[i], "--capture") && i + 1 < argc) capture = argv[++i];
+        else if (!strcmp(argv[i], "--tap") && i + 1 < argc && tap_count < 8) {
+            if (sscanf(argv[++i], "%d,%d", &tap_x[tap_count], &tap_y[tap_count]) != 2) return 2;
+            tap_count++;
+        } else { print_usage(argv[0]); return !strcmp(argv[i], "--help") ? 0 : 2; }
     }
 
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     lv_init();
-    lv_display_t *display = lv_sdl_window_create(SCREEN_W, SCREEN_H);
+    lv_display_t *display = lv_sdl_window_create(SCREEN_W * GEMMI_RENDER_SCALE, SCREEN_H * GEMMI_RENDER_SCALE);
     if (display == NULL) {
         fprintf(stderr, "Unable to create the SDL display.\n");
         return 1;
     }
     lv_sdl_window_set_title(display, "Gemmi firmware UI emulator");
-    lv_sdl_window_set_zoom(display, 2.0f);
+    lv_sdl_window_set_zoom(display, 2.0f / GEMMI_RENDER_SCALE);
     lv_indev_t *mouse = lv_sdl_mouse_create();
     lv_indev_set_display(mouse, display);
     SDL_AddEventWatch(hotkey, NULL);
@@ -135,8 +154,36 @@ int main(int argc, char **argv)
     gemmi_ui_init(display);
     show_scene(scene);
 
+    uint32_t started = SDL_GetTicks();
+    int tap_index = 0;
+    bool tap_down = false;
     while (true) {
         lv_timer_handler();
+        uint32_t elapsed = SDL_GetTicks() - started;
+        if (tap_index < tap_count && elapsed >= 500 + (uint32_t)tap_index * 350 + (tap_down ? 100 : 0)) {
+            SDL_Event event;
+            memset(&event, 0, sizeof(event));
+            event.type = tap_down ? SDL_MOUSEBUTTONUP : SDL_MOUSEBUTTONDOWN;
+            event.button.windowID = SDL_GetWindowID(lv_sdl_window_get_window(display));
+            event.button.button = SDL_BUTTON_LEFT;
+            event.button.x = tap_x[tap_index] * 2;
+            event.button.y = tap_y[tap_index] * 2;
+            SDL_PushEvent(&event);
+            if (tap_down) tap_index++;
+            tap_down = !tap_down;
+        }
+        if (capture && elapsed > 1000 + (uint32_t)tap_count * 350) {
+            SDL_Renderer *renderer = lv_sdl_window_get_renderer(display);
+            int width, height;
+            SDL_GetRendererOutputSize(renderer, &width, &height);
+            SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_ARGB8888);
+            int result = surface ? SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, surface->pixels, surface->pitch) : -1;
+            if (result == 0) result = SDL_SaveBMP(surface, capture);
+            if (surface) SDL_FreeSurface(surface);
+            if (result) fprintf(stderr, "Capture failed: %s\n", SDL_GetError());
+            lv_sdl_quit();
+            return result ? 1 : 0;
+        }
         SDL_Delay(5);
     }
 }

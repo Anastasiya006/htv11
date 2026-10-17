@@ -19,6 +19,7 @@
 #include "gemmi_ui.h"
 #include "gemmi_pet.h"
 #include "lvgl.h"
+#include "src/misc/cache/instance/lv_image_cache.h"
 #ifdef GEMMI_SYSTEM_MENLO
 #include "gemmi_ui_scale.h"
 #endif
@@ -100,6 +101,9 @@ static const int shop_catalog[8] = {0, 1, 2, 7, 3, 4, 5, 6};
 static void draw_shop_preview(lv_obj_t *preview, unsigned item);
 static lv_obj_t *pet_glasses, *pet_crown, *pet_bow;
 static lv_obj_t *pet_halo, *pet_antenna, *pet_scarf, *pet_horns;
+static lv_obj_t *jpeg_view;
+static lv_image_dsc_t jpeg_dsc;
+static uint8_t *jpeg_buf;
 static int pet_mode; /* compact shop overlay open */
 static void on_pet(lv_event_t *event);
 static void on_rest(lv_event_t *event);
@@ -173,6 +177,7 @@ static const char *TAG = "gemmi_ui";
 
 static void apply_sprite_mode(void)
 {
+    if (gif == NULL) return;
     /* Frames are native 64 px; scale factor is target * 256 / 64 = target*4. */
     if (sprite_mode == 1) {
         lv_obj_set_size(gif, 44, 44);
@@ -202,12 +207,22 @@ static void apply_sprite_mode(void)
  * the widget (fresh paused timer) whenever init lost the decoder. */
 static void swap_gif(const void *dsc)
 {
-    lv_gif_set_src(gif, dsc);
-    if (lv_image_get_src(gif) != NULL) return;
-    ESP_LOGW(TAG, "swap lost the decoder; rebuilding widget");
+    /* Never reuse the decoder: a failed re-init leaves the widget with a NULL
+     * draw buffer and a LIVE frame timer — the next tick panics. Rebuild the
+     * widget instead; a failed init keeps its timer paused (no crash, just a
+     * missing sprite until the next swap). */
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 20 * 1024) {
+        ESP_LOGW(TAG, "low contiguous heap; keeping animation");
+        return;
+    }
     lv_obj_t *parent = lv_obj_get_parent(gif);
     lv_obj_delete(gif);
     gif = lv_gif_create(parent);
+    if (gif == NULL) {
+        ESP_LOGW(TAG, "gif alloc failed, free heap %u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+        return;
+    }
     lv_obj_add_flag(gif, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(gif, on_pet, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(gif, on_rest, LV_EVENT_LONG_PRESSED, NULL);
@@ -362,6 +377,52 @@ static void select_choice(int slot)
     }
 }
 
+/* Show a pre-rendered RGB565 artifact in the scene. Takes ownership of
+ * `data` — freed when the next image arrives. Layout: w,h,pixels — no
+ * decoder needed, the bridge pre-renders on the host. */
+void gemmi_ui_show_image(uint8_t *data, size_t len)
+{
+    if (!jpeg_view) {
+        jpeg_view = lv_image_create(scene_obj);
+        lv_obj_align(jpeg_view, LV_ALIGN_CENTER, 0, 0);
+    }
+    jpeg_buf = data;
+    if (len < 4) return;
+    unsigned w = data[0] | (data[1] << 8);
+    unsigned h = data[2] | (data[3] << 8);
+    /* A legacy JPEG payload (FF D8 magic) or a bogus header must never reach
+     * lv_image — a giant frame buffer overflows straight into heap lists. */
+    if (w == 0 || w > 160 || h == 0 || h > 120 || (size_t)w * h * 2 + 4 > len) {
+        ESP_LOGW(TAG, "bad image header w=%u h=%u len=%u", w, h, (unsigned)len);
+        free(jpeg_buf);
+        jpeg_buf = NULL;
+        return;
+    }
+    jpeg_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    jpeg_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+    jpeg_dsc.header.w = w;
+    jpeg_dsc.header.h = h;
+    jpeg_dsc.header.stride = w * 2;
+    jpeg_dsc.header.flags = 0;
+    jpeg_dsc.data = data + 4;
+    jpeg_dsc.data_size = len - 4;
+    lv_image_set_src(jpeg_view, &jpeg_dsc);
+    lv_obj_remove_flag(jpeg_view, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(jpeg_view);
+}
+
+static void hide_jpeg(void)
+{
+    if (jpeg_view) lv_obj_add_flag(jpeg_view, LV_OBJ_FLAG_HIDDEN);
+    if (jpeg_buf) {
+        /* The decoded frame may live in LVGL's image cache — drop that
+         * reference before freeing, or the next alloc walks a torn list. */
+        lv_image_cache_drop(&jpeg_dsc);
+        free(jpeg_buf);
+        jpeg_buf = NULL;
+    }
+}
+
 static void show_nav_dock(void)
 {
     select_choice(-1);
@@ -464,6 +525,7 @@ static void set_sprite_home(void)
 
 static void show_home(void)
 {
+    hide_jpeg();
     ask_foreground = false;
     if (ask_back) lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
     pet_mode = 0;
@@ -589,12 +651,12 @@ static void enter_ask(void)
     ask_foreground = true;
     if (pending_ask.choice_count == 3) lv_obj_remove_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_height(scene_obj, SCENE_H);
+    lv_obj_set_height(scene_obj, 124);
     lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
     show_log(false);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
     for (int row = 0; row < AGENT_ROWS; row++) lv_obj_add_flag(agent_rows[row], LV_OBJ_FLAG_HIDDEN);
-    sprite_mode = 0;
+    sprite_mode = 3;
     apply_sprite_mode();
     lv_point_t question_size;
     lv_text_get_size(&question_size, pending_ask.message, UI_BODY, 0, 4,

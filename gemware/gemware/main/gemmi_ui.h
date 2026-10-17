@@ -20,6 +20,7 @@ typedef struct {
 /* The small, device-facing Gemmi interface. */
 void gemmi_ui_init(lv_display_t *display);
 void gemmi_ui_show_event(const gemmi_event_t *event);
+void gemmi_ui_show_image(uint8_t *data, size_t len);
 
 /* Show or clear the "offline" status line when the bridge is unreachable. */
 void gemmi_ui_offline(bool offline);

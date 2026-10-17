@@ -9,6 +9,7 @@ not silently discard the inbox.
 from __future__ import annotations
 
 import argparse
+import base64
 import hmac
 import json
 import os
@@ -27,7 +28,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 DEFAULT_PORT = 8732
-MAX_BODY_BYTES = 4096
+MAX_BODY_BYTES = 131072
+MAX_IMAGE_B64 = 90000
 MAX_EVENTS = 256
 DEFAULT_URL = os.environ.get("GEMMI_BRIDGE_URL", f"http://127.0.0.1:{DEFAULT_PORT}")
 
@@ -222,7 +224,10 @@ def normalise_event(payload: Any) -> dict[str, Any]:
         "message": clean_string(payload, "message", required=True, limit=160),
         "choices": [" ".join(choice.split())[:32] for choice in choices],
         "artifact": clean_string(payload, "artifact", limit=200),
-    }
+    } | ({"image_b64": payload["image_b64"]} if (
+        kind == "artifact" and isinstance(payload.get("image_b64"), str)
+        and len(payload["image_b64"]) <= MAX_IMAGE_B64
+        and payload["image_b64"].strip()) else {})
 
 
 def device_payload(body: bytes) -> tuple[str, int, str | None]:
@@ -319,8 +324,23 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 })
             return
         if parsed.path.startswith("/v1/events/"):
+            tail = parsed.path.rsplit("/", 1)[1].strip()
+            event = None
+            if tail.endswith("/image") or "/image" in parsed.path:
+                event_id_str = parsed.path.split("/")[3]
+                try:
+                    event = self.store.get(int(event_id_str))
+                except (ValueError, IndexError):
+                    event = None
+                if event is None or not event.get("image_b64"):
+                    self.send_json(HTTPStatus.NOT_FOUND, {"error": "no image"})
+                else:
+                    self.send_bytes(HTTPStatus.OK,
+                                    base64.b64decode(event["image_b64"]),
+                                    "application/octet-stream")
+                return
             try:
-                event = self.store.get(int(parsed.path.rsplit("/", 1)[1]))
+                event = self.store.get(int(tail))
             except ValueError:
                 event = None
             if event is None:
@@ -436,6 +456,24 @@ def submit(args: argparse.Namespace, kind: str) -> int:
         "choices": getattr(args, "choice", []),
         "artifact": getattr(args, "artifact", ""),
     }
+    image_path = getattr(args, "file", None)
+    if image_path:
+        """The device can't decode compressed images — render to RGB565 here.
+        Layout: 2-byte LE width, 2-byte LE height, then packed RGB565 LE. """
+        try:
+            from PIL import Image
+        except ImportError:
+            raise SystemExit("gemmi artifact --file needs Pillow (pip install pillow)")
+        im = Image.open(image_path).convert("RGB")
+        im.thumbnail((160, 120))
+        w, h = im.size
+        pixels = bytearray()
+        raw = im.tobytes()
+        for i in range(0, len(raw), 3):
+            px = ((raw[i] >> 3) << 11) | ((raw[i + 1] >> 2) << 5) | (raw[i + 2] >> 3)
+            pixels += px.to_bytes(2, "little")
+        packed = w.to_bytes(2, "little") + h.to_bytes(2, "little") + bytes(pixels)
+        event["image_b64"] = base64.b64encode(packed).decode()
     created = bridge_request(args, "/v1/events", method="POST", payload=event)
     print(f"Queued Gemmi event #{created['id']} ({created['kind']} from {created['agent']}).")
     wait = getattr(args, "wait", 0)
@@ -632,6 +670,7 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="block until the device answers and print the choice")
         if kind == "artifact":
             sender.add_argument("--artifact", default="", help="artifact name or URL Gemmi should reference")
+            sender.add_argument("--file", default=None, help="local JPEG file to upload for on-device viewing")
         sender.set_defaults(func=lambda parsed, selected=kind: submit(parsed, selected))
     waiter = subcommands.add_parser("wait", help="block until an ask event is answered")
     waiter.add_argument("event_id", type=int)

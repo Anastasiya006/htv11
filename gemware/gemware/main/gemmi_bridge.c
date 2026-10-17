@@ -125,6 +125,44 @@ static esp_err_t bridge_post(const char *path, int event_id, const char *choice)
     return ESP_OK;
 }
 
+typedef struct { uint8_t *buf; size_t len; } gemmi_image_t;
+
+static esp_err_t collect_image(esp_http_client_event_t *event)
+{
+    gemmi_image_t *img = event->user_data;
+    if (img == NULL || event->event_id != HTTP_EVENT_ON_DATA) return ESP_OK;
+    if (img->buf == NULL) {
+        img->buf = malloc(40960);
+        if (img->buf == NULL) return ESP_FAIL;
+    }
+    size_t avail = 40960 - img->len;
+    size_t copy = event->data_len < avail ? event->data_len : avail;
+    memcpy(img->buf + img->len, event->data, copy);
+    img->len += copy;
+    return ESP_OK;
+}
+
+/* Fetch a stored JPEG artifact. Caller owns the returned buffer. */
+static gemmi_image_t fetch_image(int event_id)
+{
+    gemmi_image_t img = {0};
+    if (client == NULL && reset_client() != ESP_OK) return img;
+    char url[192];
+    snprintf(url, sizeof(url), "%s/v1/events/%d/image", CONFIG_GEMMI_BRIDGE_URL, event_id);
+    esp_http_client_set_url(client, url);
+    esp_http_client_set_method(client, HTTP_METHOD_GET);
+    esp_http_client_set_post_field(client, NULL, 0);
+    esp_http_client_set_user_data(client, &img);
+    esp_http_client_set_header(client, "Accept", "image/jpeg");
+    esp_err_t error = esp_http_client_perform(client);
+    esp_http_client_set_header(client, "Accept", "text/plain");
+    if (error != ESP_OK || esp_http_client_get_status_code(client) != 200 || img.len == 0) {
+        free(img.buf);
+        return (gemmi_image_t){0};
+    }
+    return img;
+}
+
 static char *take_line(char **cursor)
 {
     char *line = *cursor;
@@ -270,6 +308,14 @@ static void gemmi_bridge_task(void *arg)
         gemmi_display_lock();
         gemmi_ui_show_event(&event);
         gemmi_display_unlock();
+        if (strcmp(event.kind, "artifact") == 0) {
+            gemmi_image_t img = fetch_image(event.id);
+            if (img.buf != NULL) {
+                gemmi_display_lock();
+                gemmi_ui_show_image(img.buf, img.len);
+                gemmi_display_unlock();
+            }
+        }
         ESP_LOGI(TAG, "showing %s event %d from %s", event.kind, event.id, event.agent);
         /* Asks stay unacked until the human answers or dismisses them so a
          * reboot can resurface the open question. Everything else is acked

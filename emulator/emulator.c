@@ -92,6 +92,8 @@ static void show_scene(const char *scene)
         post_event("status", "codex", "thinking", "planning the layout", "");
     } else if (strcmp(scene, "working") == 0) {
         post_event("status", "codex", "working", "editing gemmi_ui.c", "");
+    } else if (strcmp(scene, "error") == 0) {
+        post_event("status", "demo", "error", "An agent needs your help", "");
     } else if (strcmp(scene, "ask") == 0) {
         post_ask(false);
     } else if (strcmp(scene, "ask-three") == 0) {
@@ -144,7 +146,7 @@ void gemmi_bridge_answer(int event_id, const char *choice)
 
 static void print_usage(const char *program)
 {
-    printf("Usage: %s [--scene home|thinking|working|ask|artifact|agents|offline|pet|reward]\n"
+    printf("Usage: %s [--scene home|thinking|working|error|ask|artifact|agents|offline|pet|reward|level-up]\n"
            "Hotkeys: 1 thinking, 2 working, 3 ask, 4 artifact, 5 agents, 6 demo task reward, 7 demo level-up, O offline, I online\nTesting: --test-gems amount\nCapture: --capture path.bmp [--tap x,y ...] (logical coordinates)\n",
            program);
 }

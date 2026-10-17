@@ -213,10 +213,12 @@ static void show_nav_dock(void)
 
 static void set_sprite_small(void)
 {
-    /* Badge in the corner of the list/detail views, out of the rows' way. */
+    /* Badge in the corner of the list/detail views, out of the rows' way.
+     * Must re-align, not set_pos: ALIGN_CENTER would turn pos into an
+     * offset from the centre and leave the sprite overlapping the rows. */
     lv_obj_set_size(gif, 44, 44);
     lv_image_set_scale(gif, 44 * 256 / 96);
-    lv_obj_set_pos(gif, 4, 4);
+    lv_obj_align(gif, LV_ALIGN_TOP_LEFT, 4, 4);
 }
 
 static void enter_agents_list(void)
@@ -259,18 +261,29 @@ static void show_agent_detail(void)
     /* Detail puts the sprite beside the feed, a little bigger than a badge. */
     lv_obj_set_size(gif, 96, 96);
     lv_image_set_scale(gif, 256);
-    lv_obj_set_pos(gif, 6, 40);
+    lv_obj_align(gif, LV_ALIGN_TOP_LEFT, 4, 40);
     if (last_musing[0]) {
         lv_label_set_text(musing_label, last_musing);
         lv_obj_remove_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
     }
     /* Most recent line last, oldest first, one per row. */
-    char text[AGENT_LOG_LEN * (AGENT_LOG_TEXT + 1)];
+    char text[AGENT_LOG_LEN * (AGENT_LOG_TEXT + 11)];
     size_t used = 0;
     int shown = entry->log_count < AGENT_LOG_LEN ? entry->log_count : AGENT_LOG_LEN;
     for (int row = 0; row < shown; row++) {
         int idx = (entry->log_head - shown + row + AGENT_LOG_LEN) % AGENT_LOG_LEN;
-        used += snprintf(text + used, sizeof(text) - used, "%s\n", entry->log[idx]);
+        const char *line = entry->log[idx];
+        /* Line-type colours: thinking in blue, tool calls dim, rest dark. */
+        const char *colour = "#222222";
+        if (!strncmp(line, "think", 5) || !strncmp(line, "cot", 3)) {
+            colour = "#1E6FA8";
+        } else if (!strncmp(line, "tool", 4) || !strncmp(line, "ran", 3)) {
+            colour = "#666666";
+        } else if (!strncmp(line, "warn", 4) || !strncmp(line, "err", 3)) {
+            colour = "#B04A1E";
+        }
+        used += snprintf(text + used, sizeof(text) - used,
+                         "%s %s#\n", colour, line);
     }
     if (shown == 0) strlcpy(text, "no log yet\n", sizeof(text));
     lv_label_set_text(log_label, text);
@@ -522,6 +535,7 @@ void gemmi_ui_init(lv_display_t *display)
     log_label = lv_label_create(log_panel);
     lv_obj_set_size(log_label, SCENE_W - 120, SCENE_H - 28);
     lv_label_set_long_mode(log_label, LV_LABEL_LONG_CLIP);
+    lv_label_set_recolor(log_label, true);
     lv_obj_set_style_text_color(log_label, lv_color_hex(0x222222), 0);
 
     musing_label = lv_label_create(scene);

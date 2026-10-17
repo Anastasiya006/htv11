@@ -194,10 +194,13 @@ static void gemmi_bridge_task(void *arg)
         vTaskDelete(NULL);
     }
 #endif
+    bool just_shown = false;
     while (true) {
         gemmi_device_msg_t outgoing;
-        if (xQueueReceive(device_msg_queue, &outgoing,
-                          pdMS_TO_TICKS(GEMMI_POLL_INTERVAL_MS)) == pdTRUE) {
+        /* After displaying an event, poll again quickly so a burst of queued
+         * events drains fast; idle periods keep the relaxed cadence. */
+        TickType_t wait = pdMS_TO_TICKS(just_shown ? 50 : GEMMI_POLL_INTERVAL_MS);
+        if (xQueueReceive(device_msg_queue, &outgoing, wait) == pdTRUE) {
             esp_err_t sent;
             if (outgoing.choice[0] != '\0') {
                 sent = bridge_post("/v1/device/respond", outgoing.event_id, outgoing.choice);
@@ -230,11 +233,18 @@ static void gemmi_bridge_task(void *arg)
             reset_client();
             continue;
         }
-        if (status != 200 || response.length == 0) continue;
+        if (status != 200 || response.length == 0) {
+            just_shown = false;
+            continue;
+        }
 
         gemmi_event_t event;
-        if (!parse_event(response.body, &event) || event.id <= last_shown_id) continue;
+        if (!parse_event(response.body, &event) || event.id <= last_shown_id) {
+            just_shown = false;
+            continue;
+        }
         last_shown_id = event.id;
+        just_shown = true;
         gemmi_display_lock();
         gemmi_ui_show_event(&event);
         gemmi_display_unlock();

@@ -234,7 +234,7 @@ def device_payload(body: bytes) -> tuple[str, int, str | None]:
     if not isinstance(device_id, str) or not device_id.strip():
         raise ValueError("device_id is required")
     event_id = payload.get("event_id")
-    if not isinstance(event_id, int):
+    if not isinstance(event_id, int) or isinstance(event_id, bool):
         raise ValueError("event_id must be an integer")
     choice = payload.get("choice")
     if choice is not None:

@@ -173,7 +173,21 @@ class BridgeTest(unittest.TestCase):
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 400)
         self.assertEqual(ack("dev1", "abc")[0], 400)
+        self.assertEqual(ack("dev1", True)[0], 400)   # JSON bool is not an id
         self.assertEqual(respond("dev1", 1, None)[0], 400)
+
+    def test_events_listing(self):
+        post({"kind": "status", "agent": "a8", "message": "m"})
+        post({"kind": "ask", "agent": "a8", "message": "open?", "choices": ["x"]})
+        st, body = req("GET", "/v1/events")
+        self.assertEqual(st, 200)
+        view = json.loads(body)
+        self.assertEqual(len(view["events"]), 2)
+        ask_id = view["events"][1]["id"]
+        self.assertEqual(view["open_asks"], [ask_id])
+        respond("dev1", ask_id, "x")
+        st, body = req("GET", "/v1/events")
+        self.assertEqual(json.loads(body)["open_asks"], [])
 
     def test_clear(self):
         post({"kind": "status", "agent": "a8", "message": "m"})

@@ -1,0 +1,95 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "gemmi-display",
+            "type": "command",
+            "command": "node \"$GEMINI_PROJECT_DIR/simulator/gemini-hook.cjs\"",
+            "timeout": 1000
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "gemmi-display",
+            "type": "command",
+            "command": "node \"$GEMINI_PROJECT_DIR/simulator/gemini-hook.cjs\"",
+            "timeout": 1000
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "gemmi-display",
+            "type": "command",
+            "command": "node \"$GEMINI_PROJECT_DIR/simulator/gemini-hook.cjs\"",
+            "timeout": 1000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "gemmi-display",
+            "type": "command",
+            "command": "node \"$GEMINI_PROJECT_DIR/simulator/gemini-hook.cjs\"",
+            "timeout": 1000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "gemmi-display",
+            "type": "command",
+            "command": "node \"$GEMINI_PROJECT_DIR/simulator/gemini-hook.cjs\"",
+            "timeout": 1000
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "gemmi-display",
+            "type": "command",
+            "command": "node \"$GEMINI_PROJECT_DIR/simulator/gemini-hook.cjs\"",
+            "timeout": 1000
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "gemmi-display",
+            "type": "command",
+            "command": "node \"$GEMINI_PROJECT_DIR/simulator/gemini-hook.cjs\"",
+            "timeout": 1000
+          }
+        ]
+      }
+    ]
+  }
+}

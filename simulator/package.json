@@ -1,0 +1,21 @@
+{
+  "name": "gemmi-simulator",
+  "version": "1.0.0",
+  "description": "Gemmi pet simulator with an embedded Gemini CLI terminal",
+  "main": "server.cjs",
+  "scripts": {
+    "start": "node server.cjs",
+    "check": "node --check server.cjs && node --check app.js && node --check terminal.js && node --check gemini-hook.cjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.22.0"
+  },
+  "private": true
+}

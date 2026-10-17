@@ -24,6 +24,7 @@ An agent posts meaningful state changes through the same wrapper:
   --choice "Allow" --choice "Deny" "Flash the ESP32?"
 ./gemware/bin/gemmi ask --wait 120 --agent codex --choice "Yes" --choice "No" "Deploy?"
 ./gemware/bin/gemmi artifact --agent codex --state reading "Screenshot ready"
+./gemware/bin/gemmi wait <id>       # block for an answer to an earlier ask
 ./gemware/bin/gemmi events          # inspect the queue and open asks
 ./gemware/bin/gemmi clear           # drop queued events and device cursors
 ```

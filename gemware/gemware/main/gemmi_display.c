@@ -150,8 +150,8 @@ static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
          * LVGL then rotates the point by the display's 180. */
         int raw_x = touchpad_x[0];
         int raw_y = touchpad_y[0];
-        /* Same edge compression on x: raw spans ~24..206 across the panel. */
-        int x_px = (raw_x - 24) * (LCD_H_RES - 1) / (206 - 24);
+        /* Measured: raw x spans ~20..228 edge-to-edge. */
+        int x_px = (raw_x - 20) * (LCD_H_RES - 1) / (228 - 20);
         if (x_px < 0) x_px = 0;
         if (x_px > LCD_H_RES - 1) x_px = LCD_H_RES - 1;
         int y_input = raw_y * 115 / 100 - 19;

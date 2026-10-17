@@ -407,8 +407,9 @@ void gemmi_ui_show_image(uint8_t *data, size_t len)
     jpeg_dsc.data = data + 4;
     jpeg_dsc.data_size = len - 4;
     lv_image_set_src(jpeg_view, &jpeg_dsc);
-    lv_obj_remove_flag(jpeg_view, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(jpeg_view);
+    lv_image_set_scale(jpeg_view, 440); /* ~1.7x zoom, no extra buffer */
+    /* Buffer only — `view` reveals it. */
+    lv_obj_add_flag(jpeg_view, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void hide_jpeg(void)
@@ -463,6 +464,17 @@ static void enter_agents_list(void)
     set_dock_caption(2, agent_feed_count > AGENT_ROWS ? "more" : "");
 }
 
+static lv_timer_t *monitor_timer;
+static unsigned monitor_phase;
+static const char *monitor_seq[] = {"loading", "look-left", "look-right", "reading"};
+static void monitor_swap(lv_timer_t *t)
+{
+    play_state(monitor_seq[monitor_phase++ % 4], false);
+}
+static void stop_monitor(void)
+{
+    if (monitor_timer) { lv_timer_delete(monitor_timer); monitor_timer = NULL; }
+}
 static void show_agent_detail(void)
 {
     agents_mode = 2;
@@ -508,6 +520,11 @@ static void show_agent_detail(void)
     set_dock_caption(0, "back");
     set_dock_caption(1, "next");
     set_dock_caption(2, "");
+    /* Working agent: alternate between working and monitoring animations. */
+    if (!strcmp(entry->state, "working") && !monitor_timer) {
+        monitor_phase = 0;
+        monitor_timer = lv_timer_create(monitor_swap, 2600, NULL);
+    }
 }
 
 static void set_sprite_home(void)
@@ -518,6 +535,7 @@ static void set_sprite_home(void)
 
 static void show_home(void)
 {
+    stop_monitor();
     hide_jpeg();
     ask_foreground = false;
     if (ask_back) lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
@@ -581,7 +599,7 @@ static void render_pet_room(const char *feedback)
         int item = shop_catalog[shop_page * 4 + i];
         if (item < 0) { lv_obj_add_flag(shop_cards[i], LV_OBJ_FLAG_HIDDEN); continue; }
         lv_obj_remove_flag(shop_cards[i], LV_OBJ_FLAG_HIDDEN);
-        const char *names[] = {"Specs", "Crown", "Halo", "Stalk", "Scarf", "Horns", "Bow", "Snack"};
+        const char *names[] = {"Specs", "Crown", "Halo", "Stalk", "Scarf", "Phones", "Bow", "Snack"};
         lv_label_set_text(shop_names[i], names[item]);
         lv_obj_clean(shop_previews[i]);
         draw_shop_preview(shop_previews[i], (unsigned)item);
@@ -776,6 +794,9 @@ static void on_dock(lv_event_t *event)
                      last_artifact.artifact[0] ? last_artifact.artifact : last_artifact.agent);
             set_status(status);
             show_console(false);
+            /* Small Gemmi in the corner "peeking" at the image. */
+            sprite_mode = 1;
+            apply_sprite_mode();
             lv_obj_remove_flag(jpeg_view, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(jpeg_view);
         } else if (have_artifact) {
@@ -920,7 +941,7 @@ static void refresh_pet_look(void)
     }
     if (visible && equipped == GEMMI_PET_HORNS + 1 && pet_horns) {
         lv_obj_remove_flag(pet_horns, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_pos(pet_horns, sprite_mode == 0 ? 58 : 72, sprite_mode == 0 ? 4 : 2);
+        lv_obj_set_pos(pet_horns, sprite_mode == 0 ? 40 : 60, sprite_mode == 0 ? 0 : 2);
     }
     /* GIF replacement creates a new topmost sibling; keep accessories above it. */
     lv_obj_move_foreground(pet_glasses);
@@ -1130,12 +1151,15 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     lv_obj_set_style_bg_color(tail, lv_color_hex(0xF1DBE4), 0);
     lv_obj_set_style_bg_opa(tail, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(tail, lv_color_hex(0xB58297), 0);
-    pet_horns = pet_outline(scene, 58, 2, 124, 18);
+    pet_horns = pet_outline(scene, 40, 0, 160, 18);
     lv_obj_set_style_border_width(pet_horns, 0, 0);
-    static const lv_point_precise_t horn_l[] = {{0,16},{4,0},{12,14},{0,16}};
-    static const lv_point_precise_t horn_r[] = {{112,14},{120,0},{124,16},{112,14}};
-    pet_path(pet_horns, horn_l, 4, 0x8A4A58);
-    pet_path(pet_horns, horn_r, 4, 0x8A4A58);
+    /* Headphones: band arc + two earcup squares at the temples. */
+    static const lv_point_precise_t hp_band[] = {{2,14},{6,4},{80,0},{154,4},{158,14}};
+    static const lv_point_precise_t hp_cup_l[] = {{0,10},{0,17},{8,17},{8,10},{0,10}};
+    static const lv_point_precise_t hp_cup_r[] = {{152,10},{152,17},{160,17},{160,10},{152,10}};
+    pet_path(pet_horns, hp_band, 5, 0x8A4A58);
+    pet_path(pet_horns, hp_cup_l, 5, 0x8A4A58);
+    pet_path(pet_horns, hp_cup_r, 5, 0x8A4A58);
     refresh_pet_look();
 }
 

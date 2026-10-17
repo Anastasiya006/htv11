@@ -11670,16 +11670,11 @@ static const lv_image_dsc_t gemmi_waking_up_dsc = {
     .data = gemmi_waking_up_gif,
 };
 
-const gemmi_anim_t gemmi_anims[22] = {
+const gemmi_anim_t gemmi_anims[14] = {
     { "idle", &gemmi_idle_dsc, 10200 },
-    { "angry", &gemmi_angry_dsc, 2300 },
     { "blink", &gemmi_blink_dsc, 2220 },
-    { "confused", &gemmi_confused_dsc, 2180 },
-    { "crying", &gemmi_crying_dsc, 2020 },
     { "disconnected", &gemmi_disconnected_dsc, 1800 },
-    { "dizzy", &gemmi_dizzy_dsc, 1720 },
     { "error", &gemmi_error_dsc, 1770 },
-    { "exclamation", &gemmi_exclamation_dsc, 1760 },
     { "jump", &gemmi_jump_dsc, 1460 },
     { "loading", &gemmi_loading_dsc, 960 },
     { "look-left", &gemmi_look_left_dsc, 2160 },
@@ -11688,10 +11683,7 @@ const gemmi_anim_t gemmi_anims[22] = {
     { "needs-attention", &gemmi_needs_attention_dsc, 1400 },
     { "reading", &gemmi_reading_dsc, 1460 },
     { "sleeping", &gemmi_sleeping_dsc, 2310 },
-    { "spin", &gemmi_spin_dsc, 1200 },
     { "success", &gemmi_success_dsc, 1770 },
-    { "surprised", &gemmi_surprised_dsc, 1520 },
     { "thinking", &gemmi_thinking_dsc, 2340 },
-    { "waking-up", &gemmi_waking_up_dsc, 1830 },
 };
 const uint32_t gemmi_anims_count = sizeof(gemmi_anims) / sizeof(gemmi_anims[0]);

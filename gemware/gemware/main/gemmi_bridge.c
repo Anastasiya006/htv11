@@ -142,21 +142,34 @@ static esp_err_t collect_image(esp_http_client_event_t *event)
     return ESP_OK;
 }
 
-/* Fetch a stored JPEG artifact. Caller owns the returned buffer. */
+/* Fetch a stored RGB565 artifact on a dedicated client — the shared client's
+ * handler is collect_response, which would walk img as a text response and
+ * write wild. Caller owns the returned buffer. */
 static gemmi_image_t fetch_image(int event_id)
 {
     gemmi_image_t img = {0};
-    if (client == NULL && reset_client() != ESP_OK) return img;
     char url[192];
     snprintf(url, sizeof(url), "%s/v1/events/%d/image", CONFIG_GEMMI_BRIDGE_URL, event_id);
-    esp_http_client_set_url(client, url);
-    esp_http_client_set_method(client, HTTP_METHOD_GET);
-    esp_http_client_set_post_field(client, NULL, 0);
-    esp_http_client_set_user_data(client, &img);
-    esp_http_client_set_header(client, "Accept", "image/jpeg");
-    esp_err_t error = esp_http_client_perform(client);
-    esp_http_client_set_header(client, "Accept", "text/plain");
-    if (error != ESP_OK || esp_http_client_get_status_code(client) != 200 || img.len == 0) {
+    esp_http_client_config_t config = {
+        .url = url,
+        .timeout_ms = 5000,
+        .event_handler = collect_image,
+        .user_data = &img,
+#if CONFIG_GEMMI_BRIDGE_REQUIRE_TLS
+        .crt_bundle_attach = esp_crt_bundle_attach,
+#endif
+    };
+    esp_http_client_handle_t image_client = esp_http_client_init(&config);
+    if (image_client == NULL) return img;
+    if (strlen(CONFIG_GEMMI_BRIDGE_TOKEN) > 0) {
+        char authorization[128];
+        snprintf(authorization, sizeof(authorization), "Bearer %s", CONFIG_GEMMI_BRIDGE_TOKEN);
+        esp_http_client_set_header(image_client, "Authorization", authorization);
+    }
+    esp_err_t error = esp_http_client_perform(image_client);
+    int status = esp_http_client_get_status_code(image_client);
+    esp_http_client_cleanup(image_client);
+    if (error != ESP_OK || status != 200 || img.len == 0) {
         free(img.buf);
         return (gemmi_image_t){0};
     }

@@ -685,7 +685,8 @@ static void enter_ask(void)
         }
         set_dock_caption(slot, caption);
     }
-    play_state("needs-attention", false);
+    /* DEBUG: skip the animation swap to isolate the ask-path panic */
+    (void)play_state;
 }
 
 /* Back only navigates: keep the question pending without sending an answer. */

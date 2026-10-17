@@ -68,6 +68,9 @@ static gemmi_agent_state_t agent_feed[AGENT_FEED_LEN];
 static int agent_feed_count;
 static lv_obj_t *log_panel;
 static lv_obj_t *log_label;
+static lv_obj_t *musing_label;
+static lv_obj_t *agent_rows[3];
+static char last_musing[161];
 /* 0 = nav, 1 = agent list, 2 = one agent's log */
 static int agents_mode;
 static int detail_agent = -1;
@@ -199,22 +202,37 @@ static void show_nav_dock(void)
     set_dock_caption(2, "view");
 }
 
+static void set_sprite_small(void)
+{
+    lv_obj_set_size(gif, 96, 96);
+    lv_image_set_scale(gif, 256);
+    lv_obj_set_pos(gif, 6, 40);
+}
+
 static void enter_agents_list(void)
 {
     agents_mode = 1;
     detail_agent = -1;
     set_status(agent_feed_count ? "gemmi: pick an agent" : "gemmi sees no agents");
     lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
+    set_sprite_small();
     for (uint32_t slot = 0; slot < 3; slot++) {
-        char caption[40];
+        lv_obj_t *row = agent_rows[slot];
         if ((int)slot < agent_feed_count && slot < 3) {
+            char caption[40];
             snprintf(caption, sizeof(caption), "%d %s", (int)slot + 1,
                      agent_feed[slot].agent);
+            lv_label_set_text(lv_obj_get_child(row, 0), caption);
+            lv_obj_remove_flag(row, LV_OBJ_FLAG_HIDDEN);
         } else {
-            caption[0] = '\0';
+            lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
         }
-        set_dock_caption(slot, caption);
     }
+    set_dock_caption(0, "back");
+    set_dock_caption(1, "");
+    set_dock_caption(2, "");
 }
 
 static void show_agent_detail(void)
@@ -225,6 +243,14 @@ static void show_agent_detail(void)
     snprintf(status, sizeof(status), "watching %s · %s", entry->agent, entry->state);
     set_status(status);
     lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+    for (uint32_t slot = 0; slot < 3; slot++) {
+        lv_obj_add_flag(agent_rows[slot], LV_OBJ_FLAG_HIDDEN);
+    }
+    set_sprite_small();
+    if (last_musing[0]) {
+        lv_label_set_text(musing_label, last_musing);
+        lv_obj_remove_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
+    }
     /* Most recent line last, oldest first, one per row. */
     char text[AGENT_LOG_LEN * (AGENT_LOG_TEXT + 1)];
     size_t used = 0;
@@ -241,11 +267,23 @@ static void show_agent_detail(void)
     set_dock_caption(2, "");
 }
 
+static void set_sprite_home(void)
+{
+    lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
+    lv_image_set_scale(gif, GIF_SIZE * 256 / 96);
+    lv_obj_center(gif);
+}
+
 static void show_home(void)
 {
     ask_foreground = false;
     agents_mode = 0;
     lv_obj_add_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
+    for (uint32_t slot = 0; slot < 3; slot++) {
+        lv_obj_add_flag(agent_rows[slot], LV_OBJ_FLAG_HIDDEN);
+    }
+    set_sprite_home();
     if (ask_pending) {
         set_status("gemmi needs an answer");
         set_bubble("ask waiting", pending_ask.message, "1 ask");
@@ -319,18 +357,10 @@ static void on_dock(lv_event_t *event)
         return;
     }
     if (agents_mode == 1) {
-        /* Agent list: dock slots are the numbered agents; tap one to open it. */
-        if (slot < agent_feed_count && slot < 3) {
-            detail_agent = slot;
-            agents_mode = 2;
-            show_agent_detail();
-        } else {
-            show_home();
-        }
+        if (slot == 0) show_home();
         return;
     }
     if (agents_mode == 2) {
-        /* Detail: slot 0 goes back to the list, slot 1 cycles agents. */
         if (slot == 0) {
             enter_agents_list();
         } else if (slot == 1) {
@@ -369,6 +399,15 @@ static void on_dock(lv_event_t *event)
     default:
         show_home();
         break;
+    }
+}
+
+static void on_agent_row(lv_event_t *event)
+{
+    int slot = (int)(uintptr_t)lv_event_get_user_data(event);
+    if (agents_mode == 1 && slot < agent_feed_count) {
+        detail_agent = slot;
+        show_agent_detail();
     }
 }
 
@@ -429,10 +468,29 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_pad_all(scene, 0, 0);
     lv_obj_set_scrollable(scene, false);
 
-    /* Per-agent log view, shown over the scene while drilled into an agent. */
+    /* Agent list rows, one tappable numbered row per active agent. */
+    for (int slot = 0; slot < 3; slot++) {
+        agent_rows[slot] = lv_button_create(scene);
+        lv_obj_set_pos(agent_rows[slot], 4, 8 + slot * 76);
+        lv_obj_set_size(agent_rows[slot], SCENE_W - 8, 68);
+        lv_obj_set_style_bg_color(agent_rows[slot], lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_bg_color(agent_rows[slot], lv_color_hex(0xBBBBBB), LV_STATE_PRESSED);
+        lv_obj_set_style_border_color(agent_rows[slot], lv_color_hex(0x111111), 0);
+        lv_obj_set_style_border_width(agent_rows[slot], 1, 0);
+        lv_obj_set_style_radius(agent_rows[slot], 8, 0);
+        lv_obj_t *label = lv_label_create(agent_rows[slot]);
+        lv_obj_set_style_text_color(label, lv_color_hex(0x111111), 0);
+        lv_obj_center(label);
+        lv_obj_add_flag(agent_rows[slot], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_event_cb(agent_rows[slot], on_agent_row, LV_EVENT_PRESSED,
+                            (void *)(uintptr_t)slot);
+    }
+
+    /* Per-agent log view on the right of the scene while drilled in; the
+     * sprite shrinks to the left beside a thought caption. */
     log_panel = lv_obj_create(scene);
-    lv_obj_set_pos(log_panel, 2, 2);
-    lv_obj_set_size(log_panel, SCENE_W - 4, SCENE_H - 4);
+    lv_obj_set_pos(log_panel, 104, 8);
+    lv_obj_set_size(log_panel, SCENE_W - 108, SCENE_H - 16);
     lv_obj_set_style_bg_color(log_panel, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_color(log_panel, lv_color_hex(0x111111), 0);
     lv_obj_set_style_border_width(log_panel, 1, 0);
@@ -441,9 +499,16 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_scrollable(log_panel, false);
     lv_obj_add_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
     log_label = lv_label_create(log_panel);
-    lv_obj_set_size(log_label, SCENE_W - 18, SCENE_H - 18);
+    lv_obj_set_size(log_label, SCENE_W - 120, SCENE_H - 28);
     lv_label_set_long_mode(log_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(log_label, lv_color_hex(0x222222), 0);
+
+    musing_label = lv_label_create(scene);
+    lv_obj_set_pos(musing_label, 4, 140);
+    lv_obj_set_size(musing_label, 96, 96);
+    lv_label_set_long_mode(musing_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(musing_label, lv_color_hex(0x222222), 0);
+    lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
 
     gif = lv_gif_create(scene);
     lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
@@ -451,8 +516,7 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
     /* Frames are native 96 px; scale the image up so the sprite fills the
      * object instead of drawing tiny in a big box. */
-    lv_image_set_scale(gif, GIF_SIZE * 256 / 96);
-    lv_obj_center(gif);
+    set_sprite_home();
 
     lv_obj_t *bubble = bubble_obj = lv_obj_create(screen);
     lv_obj_set_pos(bubble, BUBBLE_X, BUBBLE_Y);
@@ -546,6 +610,9 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
     }
 
     char status[80];
+    if (strcmp(event->agent, "gemmi") == 0 && event->message[0]) {
+        strlcpy(last_musing, event->message, sizeof(last_musing));
+    }
     if (strcmp(event->kind, "artifact") == 0) {
         last_artifact = *event;
         have_artifact = true;

@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "gemmi_anims.h"
@@ -119,6 +121,7 @@ static void make_label_upright(lv_obj_t *label, int16_t width, int16_t height)
 
 /* Sprite placement: 0 = big centred, 1 = corner badge, 2 = detail left. */
 static int sprite_mode;
+static const char *TAG = "gemmi_ui";
 
 static void apply_sprite_mode(void)
 {
@@ -143,11 +146,25 @@ static void apply_sprite_mode(void)
  * timer, so a failed init just leaves the sprite absent instead. */
 static void recreate_gif(const void *dsc)
 {
+    /* The new widget needs a ~37 KB contiguous frame buffer; under heap
+     * fragmentation that alloc fails and the sprite would vanish entirely.
+     * When the largest free block cannot fit it, keep the current animation
+     * running instead. */
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 42 * 1024) {
+        ESP_LOGW(TAG, "low contiguous heap; keeping animation");
+        return;
+    }
     lv_obj_t *parent = lv_obj_get_parent(gif);
     lv_obj_delete(gif);
     gif = lv_gif_create(parent);
     lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
     lv_gif_set_src(gif, dsc);
+    /* When init fails the gif keeps no image source; the sprite is just
+     * absent until the next swap retries. */
+    if (lv_image_get_src(gif) == NULL) {
+        ESP_LOGW(TAG, "gif init failed, free heap %u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+    }
     apply_sprite_mode();
 }
 

@@ -1,0 +1,6 @@
+#pragma once
+
+#include <stdio.h>
+
+#define ESP_LOGW(tag, format, ...) \
+    fprintf(stderr, "W (%s): " format "\n", tag, ##__VA_ARGS__)

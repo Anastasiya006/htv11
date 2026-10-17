@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "gemmi_anims.h"
 #include "gemmi_bridge.h"
@@ -104,6 +105,10 @@ static void back_to_idle(lv_timer_t *timer)
         current_animation = GEMMI_ANIM_IDLE;
     }
 }
+
+#define SCENE_W 226
+#define SCENE_H 238
+#define GIF_SIZE 176
 
 static int64_t last_swap_us;
 
@@ -359,8 +364,8 @@ void gemmi_ui_init(lv_display_t *display)
     gif = lv_gif_create(scene);
     lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
     lv_gif_set_src(gif, gemmi_anims[GEMMI_ANIM_IDLE].dsc);
-    lv_obj_set_size(gif, 96, 96);
-    lv_obj_align(gif, LV_ALIGN_BOTTOM_MID, 0, 2);
+    lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
+    lv_obj_center(gif);
 
     lv_obj_t *bubble = lv_obj_create(screen);
     lv_obj_set_pos(bubble, BUBBLE_X, BUBBLE_Y);

@@ -1151,12 +1151,12 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     lv_obj_set_style_bg_color(tail, lv_color_hex(0xF1DBE4), 0);
     lv_obj_set_style_bg_opa(tail, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(tail, lv_color_hex(0xB58297), 0);
-    pet_horns = pet_outline(scene, 40, 0, 160, 18);
+    pet_horns = pet_outline(scene, 34, 18, 172, 22);
     lv_obj_set_style_border_width(pet_horns, 0, 0);
-    /* Headphones: band arc + two earcup squares at the temples. */
-    static const lv_point_precise_t hp_band[] = {{2,14},{6,4},{80,0},{154,4},{158,14}};
-    static const lv_point_precise_t hp_cup_l[] = {{0,10},{0,17},{8,17},{8,10},{0,10}};
-    static const lv_point_precise_t hp_cup_r[] = {{152,10},{152,17},{160,17},{160,10},{152,10}};
+    /* Headphones: band arc + two earcup squares hugging the temples. */
+    static const lv_point_precise_t hp_band[] = {{4,16},{12,2},{86,0},{160,2},{168,16}};
+    static const lv_point_precise_t hp_cup_l[] = {{0,8},{0,20},{12,20},{12,8},{0,8}};
+    static const lv_point_precise_t hp_cup_r[] = {{160,8},{160,20},{172,20},{172,8},{160,8}};
     pet_path(pet_horns, hp_band, 5, 0x8A4A58);
     pet_path(pet_horns, hp_cup_l, 5, 0x8A4A58);
     pet_path(pet_horns, hp_cup_r, 5, 0x8A4A58);

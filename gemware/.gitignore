@@ -1,0 +1,7 @@
+# ESP-IDF generates these locally; they are reproducible from the manifest and defaults.
+gemware/build/
+gemware/managed_components/
+
+# Local project configuration may contain Wi-Fi credentials.
+gemware/sdkconfig
+gemware/sdkconfig.old

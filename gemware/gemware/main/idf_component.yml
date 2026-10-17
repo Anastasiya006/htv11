@@ -1,0 +1,12 @@
+dependencies:
+  lvgl/lvgl: "9.6.0"
+  espressif/esp_lcd_ili9341: "^2.1.0"
+  atanisoft/esp_lcd_touch_xpt2046: "1.0.6"
+  espressif/esp_wifi_remote:
+    version: ">=0.10,<2.0"
+    rules:
+      - if: "target in [esp32p4, esp32h2]"
+  espressif/esp_hosted:
+    version: "~2"
+    rules:
+      - if: "target in [esp32p4, esp32h2]"

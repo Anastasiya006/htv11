@@ -964,8 +964,8 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
 {
     init_compact_pet_hud(screen);
     pet_badge = lv_label_create(screen);
-    lv_obj_set_pos(pet_badge, 126, 8);
-    lv_obj_set_size(pet_badge, 91, 12);
+    lv_obj_set_pos(pet_badge, 110, 8);
+    lv_obj_set_size(pet_badge, 118, 12);
 #ifdef GEMMI_SYSTEM_MENLO
     lv_obj_set_style_text_font(pet_badge, &gemmi_menlo_8, 0);
 #else
@@ -1165,17 +1165,18 @@ void gemmi_ui_init(lv_display_t *display)
     make_label_upright(status_label, 90, 12);
     lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_LEFT, 0);
 
+    /* Dock row aligns with the console box above it: edges at x=12 and x=228. */
     for (uint32_t index = 0; index < 3; index++) {
-        dock_labels[index] = create_button(screen, 6 + (int16_t)index * 62, SCREEN_H - 34,
-                                           56, 24, (int)index);
+        dock_labels[index] = create_button(screen, 12 + (int16_t)index * 58, SCREEN_H - 34,
+                                           52, 24, (int)index);
         dock_buttons[index] = lv_obj_get_parent(dock_labels[index]);
     }
     /* Store sits at the bottom-right of the dock row. */
-    store_button = pet_outline(screen, 196, SCREEN_H - 34, 38, 24);
+    store_button = pet_outline(screen, 186, SCREEN_H - 34, 42, 24);
     lv_obj_set_style_border_color(store_button, lv_color_hex(0x888888), 0);
     lv_obj_add_flag(store_button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(store_button, on_shop, LV_EVENT_PRESSED, NULL);
-    lv_obj_t *bag_icon = pet_outline(store_button, 14, 6, 9, 10);
+    lv_obj_t *bag_icon = pet_outline(store_button, 16, 6, 9, 10);
     lv_obj_set_style_border_width(bag_icon, 0, 0);
     static const lv_point_precise_t bag[] = {{1,3},{7,3},{8,9},{0,9},{1,3}};
     static const lv_point_precise_t handle[] = {{2,4},{2,1},{3,0},{5,0},{6,1},{6,4}};

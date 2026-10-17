@@ -186,9 +186,12 @@ class EventStore:
             self.joined.clear()
             # Keep id numbering monotonic across a restart so devices holding
             # a higher last-seen id do not skip the new epoch's events.
+            # Write-then-rename so a kill mid-write cannot leave a torn file.
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps({"next_id": self.next_id}) + "\n",
-                                 encoding="utf-8")
+            temp = self.path.with_suffix(".tmp")
+            temp.write_text(json.dumps({"next_id": self.next_id}) + "\n",
+                            encoding="utf-8")
+            temp.replace(self.path)
 
 
 def clean_string(payload: dict[str, Any], key: str, *, required: bool = False, limit: int = 160) -> str:
@@ -299,6 +302,14 @@ class BridgeHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
             self.send_json(HTTPStatus.OK, {"ok": True, "version": 1})
+            return
+        if parsed.path == "/v1/events":
+            with self.store.lock:
+                self.send_json(HTTPStatus.OK, {
+                    "events": list(self.store.events),
+                    "open_asks": [e["id"] for e in self.store.events
+                                  if e["kind"] == "ask" and "response" not in e],
+                })
             return
         if parsed.path.startswith("/v1/events/"):
             try:
@@ -433,6 +444,20 @@ def submit(args: argparse.Namespace, kind: str) -> int:
         time.sleep(0.7)
     print(f"Timed out after {wait:g}s waiting for a Gemmi answer to #{created['id']}.")
     return 2
+
+
+def list_events(args: argparse.Namespace) -> int:
+    view = bridge_request(args, "/v1/events")
+    open_asks = set(view["open_asks"])
+    for event in view["events"]:
+        marker = "??" if event["id"] in open_asks else ("ok" if event.get("response") else "..")
+        answer = event.get("response", {}).get("choice", "")
+        tail = f" -> {answer}" if answer else ""
+        print(f"{marker} #{event['id']} {event['kind']} {event['agent']}: "
+              f"{event['message'][:60]}{tail}")
+    if open_asks:
+        print(f"open asks waiting on a device: {sorted(open_asks)}")
+    return 0
 
 
 def clear_events(args: argparse.Namespace) -> int:
@@ -583,6 +608,11 @@ def build_parser() -> argparse.ArgumentParser:
         if kind == "artifact":
             sender.add_argument("--artifact", default="", help="artifact name or URL Gemmi should reference")
         sender.set_defaults(func=lambda parsed, selected=kind: submit(parsed, selected))
+    events_parser = subcommands.add_parser("events", help="list queued events and open asks")
+    events_parser.add_argument("--url", default=DEFAULT_URL, help="bridge URL (or GEMMI_BRIDGE_URL)")
+    events_parser.add_argument("--timeout", default=3, type=float)
+    events_parser.add_argument("--token-file", default=str(default_token_path()))
+    events_parser.set_defaults(func=list_events)
     clearer = subcommands.add_parser("clear", help="drop every queued event and device cursor")
     clearer.add_argument("--url", default=DEFAULT_URL, help="bridge URL (or GEMMI_BRIDGE_URL)")
     clearer.add_argument("--timeout", default=3, type=float)

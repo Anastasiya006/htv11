@@ -176,6 +176,12 @@ static void set_dock_caption(uint32_t slot, const char *caption)
 {
     if (slot >= 3) return;
     lv_label_set_text(dock_labels[slot], caption);
+    /* An empty caption would leave a dead button on screen. */
+    if (caption[0] == '\0') {
+        lv_obj_add_flag(dock_buttons[slot], LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(dock_buttons[slot], LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void select_choice(int slot)

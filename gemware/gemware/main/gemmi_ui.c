@@ -502,7 +502,7 @@ static void refresh_pet_badge(void)
     if (!pet_badge) return;
     char text[64];
     const gemmi_pet_stats_t *stats = gemmi_pet_stats();
-    snprintf(text, sizeof(text), "Lv.%lu · %lu", (unsigned long)gemmi_pet_level(), (unsigned long)stats->gems);
+    snprintf(text, sizeof(text), "Lv.%lu / %lu", (unsigned long)gemmi_pet_level(), (unsigned long)stats->gems);
     lv_label_set_text(pet_badge, text);
 
 }

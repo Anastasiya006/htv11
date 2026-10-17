@@ -170,13 +170,13 @@ static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
     static unsigned pulse;
     if (data->state == LV_INDEV_STATE_PRESSED) {
         if (!dot) {
-            dot = lv_obj_create(lv_layer_top());
-            lv_obj_set_size(dot, 10, 10);
-            lv_obj_set_style_border_width(dot, 0, 0);
-            lv_obj_set_style_shadow_width(dot, 0, 0);
-            lv_obj_set_style_transform_rotation(dot, 450, 0);
-            lv_obj_set_style_transform_pivot_x(dot, 5, 0);
-            lv_obj_set_style_transform_pivot_y(dot, 5, 0);
+            dot = lv_line_create(lv_layer_top());
+            /* Gemmi-shaped outline: a small diamond. */
+            static const lv_point_precise_t gem[] = {
+                {5,0},{10,5},{5,10},{0,5},{5,0}
+            };
+            lv_line_set_points(dot, gem, 5);
+            lv_obj_set_style_line_width(dot, 3, 0);
             lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
         }
         /* LVGL rotates indev points by the display rotation (180), so the
@@ -190,7 +190,7 @@ static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
         lv_color_t c = lv_color_mix(lv_color_hex(0x3A6AE4),
                                     lv_color_hex(0x8B3FD9),
                                     pulse <= 32 ? pulse * 8 : (63 - pulse) * 8);
-        lv_obj_set_style_bg_color(dot, c, 0);
+        lv_obj_set_style_line_color(dot, c, 0);
         lv_obj_remove_flag(dot, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(dot);
     } else if (dot) {

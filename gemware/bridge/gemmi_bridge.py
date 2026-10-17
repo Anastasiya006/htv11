@@ -86,6 +86,8 @@ class EventStore:
                     device, after = mark.get("device"), mark.get("after")
                     if isinstance(device, str) and isinstance(after, int):
                         self.joined[device] = max(self.joined.get(device, 0), after)
+                elif isinstance(record.get("next_id"), int) and record.get("kind") is None:
+                    self.next_id = max(self.next_id, record["next_id"])
         self.events = self.events[-MAX_EVENTS:]
         by_id = {event["id"]: event for event in self.events}
         for record in responses:
@@ -182,8 +184,11 @@ class EventStore:
             self.events.clear()
             self.consumed.clear()
             self.joined.clear()
+            # Keep id numbering monotonic across a restart so devices holding
+            # a higher last-seen id do not skip the new epoch's events.
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text("", encoding="utf-8")
+            self.path.write_text(json.dumps({"next_id": self.next_id}) + "\n",
+                                 encoding="utf-8")
 
 
 def clean_string(payload: dict[str, Any], key: str, *, required: bool = False, limit: int = 160) -> str:

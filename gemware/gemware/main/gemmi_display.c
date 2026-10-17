@@ -87,9 +87,9 @@ static void lvgl_port_update_callback(lv_display_t *disp)
         break;
     case LV_DISPLAY_ROTATION_180:
         esp_lcd_panel_swap_xy(panel_handle, false);
-        /* LVGL already renders the full 180 in software; any hardware mirror
-         * here would come out as backwards text. */
-        esp_lcd_panel_mirror(panel_handle, false, false);
+        /* LVGL does not rotate the framebuffer (matrix rotation is off), so
+         * the hardware does the whole 180: both axes mirrored. */
+        esp_lcd_panel_mirror(panel_handle, true, true);
         break;
     case LV_DISPLAY_ROTATION_270:
         esp_lcd_panel_swap_xy(panel_handle, true);
@@ -98,14 +98,33 @@ static void lvgl_port_update_callback(lv_display_t *disp)
     }
 }
 
+/* This panel's MADCTL MX bit does not flip the columns (observed: both
+ * mirror_x values render identically), so the last step of the 180 is done
+ * by reversing each flushed row in software and drawing it mirrored. */
+static void flip_rows_x(uint8_t *px_map, int width, int height)
+{
+    uint16_t *pixels = (uint16_t *)px_map;
+    for (int row = 0; row < height; row++) {
+        uint16_t *line = pixels + row * width;
+        for (int left = 0, right = width - 1; left < right; left++, right--) {
+            uint16_t swap = line[left];
+            line[left] = line[right];
+            line[right] = swap;
+        }
+    }
+}
+
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     lvgl_port_update_callback(disp);
     esp_lcd_panel_handle_t panel_handle = lv_display_get_user_data(disp);
-    int offsetx1 = area->x1;
-    int offsetx2 = area->x2;
     int offsety1 = area->y1;
     int offsety2 = area->y2;
+    int width = area->x2 - area->x1 + 1;
+    int height = offsety2 - offsety1 + 1;
+    flip_rows_x(px_map, width, height);
+    int offsetx1 = LCD_H_RES - 1 - area->x2;
+    int offsetx2 = LCD_H_RES - 1 - area->x1;
     // LVGL renders directly in the ILI9341's big-endian RGB565 byte order.
     esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, px_map);
 }

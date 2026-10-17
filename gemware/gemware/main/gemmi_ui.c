@@ -101,15 +101,21 @@ static void back_to_idle(lv_timer_t *timer)
     }
 }
 
+static int64_t last_swap_us;
+
 static void play_state(const char *state, bool return_to_idle)
 {
     uint32_t index = animation_for_state(state);
-    /* LVGL's ARGB GIF transform path crashes on this ESP32 when the same
-     * animated source is repeatedly scaled/reloaded. Keep GIFs native-size
-     * until we ship pre-scaled assets, and never reload an unchanged source. */
+    /* LVGL's ARGB GIF transform path crashes on this ESP32 when an animated
+     * source is reloaded too quickly. Keep GIFs native-size, never reload an
+     * unchanged source, and coalesce bursts to one swap per 300 ms. */
     if (index != current_animation) {
-        lv_gif_set_src(gif, gemmi_anims[index].dsc);
-        current_animation = index;
+        int64_t now = esp_timer_get_time();
+        if (now - last_swap_us >= 300000) {
+            lv_gif_set_src(gif, gemmi_anims[index].dsc);
+            current_animation = index;
+            last_swap_us = now;
+        }
     }
 
     if (idle_timer) {

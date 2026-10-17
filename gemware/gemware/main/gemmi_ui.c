@@ -88,7 +88,7 @@ static lv_obj_t *list_title;
 static lv_obj_t *agent_row_states[4];
 static lv_obj_t *dock_buttons[3];
 static lv_obj_t *dock_labels[3];
-static lv_obj_t *dock_icons[3];
+
 static lv_obj_t *pet_badge;
 static lv_obj_t *ask_back;
 
@@ -335,19 +335,8 @@ static void set_dock_caption(uint32_t slot, const char *caption)
     snprintf(display_caption, sizeof(display_caption), "%s", caption);
     if (display_caption[0] >= 'a' && display_caption[0] <= 'z') display_caption[0] -= 'a' - 'A';
     lv_label_set_text(dock_labels[slot], display_caption);
-    bool with_icon = !strcmp(caption, "agents") || !strcmp(caption, "asks") || !strcmp(caption, "view");
-    if (with_icon) {
-        lv_point_t text_size;
-        lv_text_get_size(&text_size, display_caption, UI_MONO, 0, 0, 100, LV_TEXT_FLAG_NONE);
-        lv_obj_set_size(dock_labels[slot], text_size.x + 1, 14);
-        lv_obj_align(dock_labels[slot], LV_ALIGN_CENTER, 6, 0);
-        lv_obj_align(dock_icons[slot], LV_ALIGN_CENTER, -(text_size.x + 4) / 2, -1);
-        lv_obj_remove_flag(dock_icons[slot], LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_set_size(dock_labels[slot], 54, 14);
-        lv_obj_center(dock_labels[slot]);
-        lv_obj_add_flag(dock_icons[slot], LV_OBJ_FLAG_HIDDEN);
-    }
+    lv_obj_set_size(dock_labels[slot], 54, 14);
+    lv_obj_center(dock_labels[slot]);
     /* An empty caption would leave a dead button on screen. */
     if (caption[0] == '\0') {
         lv_obj_add_flag(dock_buttons[slot], LV_OBJ_FLAG_HIDDEN);
@@ -766,31 +755,6 @@ static void on_bubble(lv_event_t *event)
     }
 }
 
-/* Compact line icons: rasterize directly on the desktop pixel grid. */
-#ifdef GEMMI_SYSTEM_MENLO
-#define ICON_PX(x) ((x) * 3)
-#define ICON_STROKE 2
-#else
-#define ICON_PX(x) ((x) * 3 / 4)
-#define ICON_STROKE 1
-#endif
-#define IP(x,y) {ICON_PX(x), ICON_PX(y)}
-static const lv_point_precise_t person_head[] = {IP(4,1),IP(6,0),IP(8,1),IP(9,3),IP(8,5),IP(6,6),IP(4,5),IP(3,3),IP(4,1)};
-static const lv_point_precise_t person_body[] = {IP(1,12),IP(1,10),IP(2,8),IP(4,7),IP(8,7),IP(10,8),IP(11,10),IP(11,12)};
-static const lv_point_precise_t speech[] = {IP(2,1),IP(10,1),IP(11,2),IP(11,8),IP(10,9),IP(6,9),IP(2,12),IP(2,9),IP(1,8),IP(1,2),IP(2,1)};
-static const lv_point_precise_t speech_text[] = {IP(4,5),IP(8,5)};
-static const lv_point_precise_t picture[] = {IP(2,1),IP(10,1),IP(11,2),IP(11,10),IP(10,11),IP(2,11),IP(1,10),IP(1,2),IP(2,1)};
-static const lv_point_precise_t mountains[] = {IP(1,9),IP(5,5),IP(8,8),IP(10,6),IP(11,7)};
-static void icon_line(lv_obj_t *parent, const lv_point_precise_t *points, uint32_t count)
-{
-    lv_obj_t *line = lv_line_create(parent);
-    lv_line_set_points(line, points, count);
-    lv_obj_set_style_line_width(line, ICON_STROKE, 0);
-    lv_obj_set_style_line_color(line, lv_color_hex(0x444444), 0);
-    lv_obj_set_style_line_rounded(line, false, 0);
-    lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
-}
-
 static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t width, int16_t height,
                                int slot)
 {
@@ -818,23 +782,6 @@ static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t w
     lv_obj_set_style_text_font(label, UI_MONO, 0);
     make_label_upright(label, width - 10, 14);
     lv_obj_center(label);
-    lv_obj_t *icon = dock_icons[slot] = lv_obj_create(button);
-    lv_obj_set_size(icon, 9, 9);
-    lv_obj_set_style_pad_all(icon, 0, 0);
-    lv_obj_set_style_border_width(icon, 0, 0);
-    lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
-    lv_obj_remove_flag(icon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(icon, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-    if (slot == 0) {
-        icon_line(icon, person_head, 9);
-        icon_line(icon, person_body, 8);
-    } else if (slot == 1) {
-        icon_line(icon, speech, 11);
-        icon_line(icon, speech_text, 2);
-    } else {
-        icon_line(icon, picture, 9);
-        icon_line(icon, mountains, 5);
-    }
     return label;
 }
 
@@ -979,17 +926,8 @@ static void draw_shop_preview(lv_obj_t *preview, unsigned item)
 
 static void init_compact_pet_hud(lv_obj_t *screen)
 {
-    lv_obj_t *shop_button = pet_outline(screen, 215, 2, 22, 23);
-    lv_obj_set_style_border_width(shop_button, 0, 0);
-    lv_obj_add_flag(shop_button, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(shop_button, on_shop, LV_EVENT_PRESSED, NULL);
-    /* Keep the touch target generous while matching the header's small type. */
-    lv_obj_t *bag_icon = pet_outline(shop_button, 5, 6, 9, 10);
-    lv_obj_set_style_border_width(bag_icon, 0, 0);
-    static const lv_point_precise_t bag[] = {PP(1,3),PP(7,3),PP(8,9),PP(0,9),PP(1,3)};
-    static const lv_point_precise_t handle[] = {PP(2,4),PP(2,1),PP(3,0),PP(5,0),PP(6,1),PP(6,4)};
-    pet_path(bag_icon, bag, 5, 0x77717E); pet_path(bag_icon, handle, 6, 0x77717E);
-
+    /* The store lives on the dock's bottom-right button instead of a
+     * top-right icon. */
     shop_panel = pet_outline(screen, 12, 171, 216, 105);
     lv_obj_set_style_bg_color(shop_panel, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(shop_panel, LV_OPA_COVER, 0);

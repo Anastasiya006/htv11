@@ -1,2 +1,6 @@
 .env
 emulator/build/
+
+# Local virtual pet progress
+.gemmi-pet-state
+.gemmi-pet-state.tmp

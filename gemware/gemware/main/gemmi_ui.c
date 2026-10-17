@@ -17,6 +17,7 @@
 #include "gemmi_anims.h"
 #include "gemmi_bridge.h"
 #include "gemmi_ui.h"
+#include "gemmi_pet.h"
 #include "lvgl.h"
 #ifdef GEMMI_SYSTEM_MENLO
 #include "gemmi_ui_scale.h"
@@ -88,6 +89,21 @@ static lv_obj_t *agent_row_states[4];
 static lv_obj_t *dock_buttons[3];
 static lv_obj_t *dock_labels[3];
 static lv_obj_t *dock_icons[3];
+static lv_obj_t *pet_badge;
+static lv_obj_t *ask_back;
+
+static lv_obj_t *shop_panel, *shop_feedback, *shop_cards[4], *shop_prices[4];
+static lv_obj_t *shop_previews[4], *shop_names[4], *shop_title;
+static unsigned shop_page;
+static const int shop_catalog[8] = {0, 1, 2, 7, 3, 4, 5, 6};
+static void draw_shop_preview(lv_obj_t *preview, unsigned item);
+static lv_obj_t *pet_glasses, *pet_crown, *pet_bow;
+static int pet_mode; /* compact shop overlay open */
+static void on_pet(lv_event_t *event);
+static void on_rest(lv_event_t *event);
+static void refresh_pet_badge(void);
+static void refresh_pet_look(void);
+static void render_pet_room(const char *feedback);
 static uint32_t current_animation = GEMMI_ANIM_IDLE;
 
 static gemmi_event_t pending_ask;
@@ -147,7 +163,7 @@ static void make_label_upright(lv_obj_t *label, int16_t width, int16_t height)
 
 #define SCENE_W 240
 #define SCENE_H 178
-#define GIF_SIZE 168
+#define GIF_SIZE 156
 
 /* Sprite placement: 0 = big centred, 1 = corner badge, 2 = detail left. */
 static int sprite_mode;
@@ -172,6 +188,7 @@ static void apply_sprite_mode(void)
         lv_image_set_scale(gif, GIF_SIZE * 256 / 96);
         lv_obj_center(gif);
     }
+    refresh_pet_look();
 }
 
 /* Never call lv_gif_set_src: if the new draw buffer fails to allocate the
@@ -191,6 +208,9 @@ static void recreate_gif(const void *dsc)
     lv_obj_t *parent = lv_obj_get_parent(gif);
     lv_obj_delete(gif);
     gif = lv_gif_create(parent);
+    lv_obj_add_flag(gif, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(gif, on_pet, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(gif, on_rest, LV_EVENT_LONG_PRESSED, NULL);
     lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
     lv_gif_set_src(gif, dsc);
     /* When init fails the gif keeps no image source; the sprite is just
@@ -244,6 +264,12 @@ static void play_state(const char *state, bool return_to_idle)
         idle_timer = lv_timer_create(back_to_idle, gemmi_anims[index].total_ms, NULL);
         lv_timer_set_repeat_count(idle_timer, 1);
     }
+}
+
+static void level_up_celebration(lv_timer_t *timer)
+{
+    LV_UNUSED(timer);
+    if (!ask_foreground && !ask_pending) play_state("jump", true);
 }
 
 static void set_bubble(const char *headline, const char *message, const char *queue)
@@ -452,6 +478,9 @@ static void set_sprite_home(void)
 static void show_home(void)
 {
     ask_foreground = false;
+    if (ask_back) lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
+    pet_mode = 0;
+    if (shop_panel) lv_obj_add_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
     agents_mode = 0;
     lv_obj_set_height(scene_obj, SCENE_H);
     lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
@@ -478,11 +507,100 @@ static void show_home(void)
     }
     show_nav_dock();
     play_state("idle", false);
+    lv_obj_invalidate(lv_obj_get_screen(bubble_obj));
+}
+
+static void refresh_pet_badge(void)
+{
+    if (!pet_badge) return;
+    char text[64];
+    const gemmi_pet_stats_t *stats = gemmi_pet_stats();
+    snprintf(text, sizeof(text), "Lv.%lu / %lu gems", (unsigned long)gemmi_pet_level(), (unsigned long)stats->gems);
+    lv_label_set_text(pet_badge, text);
+
+}
+
+static void render_pet_room(const char *feedback)
+{
+    if (!shop_panel) return;
+    if (!pet_mode) {
+        lv_obj_add_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
+        if (!ask_foreground && !agents_mode) { sprite_mode = 0; apply_sprite_mode(); }
+        lv_obj_invalidate(lv_obj_get_screen(bubble_obj));
+        return;
+    }
+    sprite_mode = 3;
+    apply_sprite_mode();
+    lv_obj_remove_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(shop_panel);
+    const gemmi_pet_stats_t *stats = gemmi_pet_stats();
+    for (unsigned i = 0; i < 4; i++) {
+        char price[24];
+        int item = shop_catalog[shop_page * 4 + i];
+        if (item < 0) { lv_obj_add_flag(shop_cards[i], LV_OBJ_FLAG_HIDDEN); continue; }
+        lv_obj_remove_flag(shop_cards[i], LV_OBJ_FLAG_HIDDEN);
+        const char *names[] = {"Specs", "Crown", "Mint", "Rose", "Sky", "Dusk", "Bow", "Snack"};
+        lv_label_set_text(shop_names[i], names[item]);
+        lv_obj_clean(shop_previews[i]);
+        draw_shop_preview(shop_previews[i], (unsigned)item);
+        bool owned = item < GEMMI_PET_ITEM_COUNT && (stats->owned & (1u << item));
+        bool equipped = item < GEMMI_PET_ITEM_COUNT && stats->equipped == (unsigned)item + 1;
+        snprintf(price, sizeof(price), "%s", equipped ? "On" : owned ? "Owned" : "");
+        if (!owned) snprintf(price, sizeof(price), "%lu gems", (unsigned long)(item < GEMMI_PET_ITEM_COUNT ? gemmi_pet_items[item].cost : 3));
+        lv_label_set_text(shop_prices[i], price);
+        lv_obj_set_style_border_color(shop_cards[i], lv_color_hex(equipped ? 0x9477AA : 0xD3CFD8), 0);
+        lv_obj_set_style_bg_color(shop_cards[i], lv_color_hex(equipped ? 0xF5F1FA : 0xFFFFFF), 0);
+    }
+    lv_label_set_text(shop_title, shop_page ? "Little shop 2/2" : "Little shop 1/2");
+    lv_label_set_text(shop_feedback, !gemmi_pet_save_ok() ? "Could not save progress" : feedback ? feedback : "Tap to buy / equip");
+    refresh_pet_badge(); refresh_pet_look();
+    lv_obj_invalidate(lv_obj_get_screen(bubble_obj));
+}
+
+static void open_pet_room(void)
+{
+    if (ask_foreground || ask_pending || agents_mode) return;
+    pet_mode = !pet_mode;
+    render_pet_room(NULL);
+}
+void gemmi_ui_open_pet(void) { open_pet_room(); }
+
+static void on_shop(lv_event_t *event) { LV_UNUSED(event); open_pet_room(); }
+static void on_shop_item(lv_event_t *event)
+{
+    unsigned slot = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    int item = shop_catalog[shop_page * 4 + slot];
+    if (item < 0) return;
+    const char *feedback = item < GEMMI_PET_ITEM_COUNT ? gemmi_pet_shop((unsigned)item) : gemmi_pet_care(1);
+    render_pet_room(feedback);
+    if (item == GEMMI_PET_ITEM_COUNT) play_state("success", true);
+}
+static void on_shop_next(lv_event_t *event) { LV_UNUSED(event); shop_page = 1 - shop_page; render_pet_room(NULL); }
+static void on_rest(lv_event_t *event)
+{
+    LV_UNUSED(event);
+    if (ask_foreground || ask_pending || agents_mode) return;
+    gemmi_pet_care(2);
+    play_state("idle", false);
+    refresh_pet_badge();
+}
+static void on_pet(lv_event_t *event)
+{
+    LV_UNUSED(event);
+    if (ask_foreground || ask_pending || agents_mode) return;
+    gemmi_pet_care(0);
+    refresh_pet_badge();
+    play_state("success", true);
 }
 
 static void enter_ask(void)
 {
+    pet_mode = 0;
+    if (shop_panel) lv_obj_add_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
+    agents_mode = 0;
     ask_foreground = true;
+    if (pending_ask.choice_count == 3) lv_obj_remove_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(scene_obj, 124);
     lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
     show_log(false);
@@ -520,13 +638,13 @@ static void enter_ask(void)
     play_state("needs-attention", false);
 }
 
-/* Leaving an ask without answering consumes it on the bridge; it stays open
- * for the agent and can be reopened from the asks slot. */
+/* Back only navigates: keep the question pending without sending an answer. */
 static void dismiss_ask(void)
 {
-    gemmi_bridge_answer(pending_ask.id, NULL);
     show_home();
 }
+
+static void on_ask_back(lv_event_t *event) { LV_UNUSED(event); dismiss_ask(); }
 
 static void send_choice(int slot)
 {
@@ -534,6 +652,7 @@ static void send_choice(int slot)
     gemmi_bridge_answer(pending_ask.id, choice);
     ask_pending = false;
     ask_foreground = false;
+    lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
     set_sprite_home();
     lv_obj_set_height(scene_obj, SCENE_H);
     lv_obj_set_pos(bubble_obj, BUBBLE_X, BUBBLE_Y);
@@ -565,6 +684,8 @@ static void on_dock(lv_event_t *event)
         }
         return;
     }
+    if (pet_mode) { pet_mode = 0; render_pet_room(NULL); }
+    if (agents_mode >= 3) { if (slot == 0) show_home(); return; }
     if (agents_mode == 1) {
         if (slot == 0) {
             show_home();
@@ -593,21 +714,29 @@ static void on_dock(lv_event_t *event)
         if (ask_pending) {
             enter_ask();
         } else {
+            agents_mode = 3;
             set_status("gemmi checked - no asks");
-            show_console(false);
+            set_bubble("Gemmi", "No questions waiting.", "");
+            show_console(true);
+            set_dock_caption(0, "back"); set_dock_caption(1, ""); set_dock_caption(2, "");
             play_state("thinking", true);
         }
         break;
     case GEMMI_ACTION_VIEW:
+        agents_mode = 4;
+        select_choice(-1);
+        set_dock_caption(0, "back"); set_dock_caption(1, ""); set_dock_caption(2, "");
         if (have_artifact) {
             char status[80];
             snprintf(status, sizeof(status), "gemmi is viewing %.40s",
                      last_artifact.artifact[0] ? last_artifact.artifact : last_artifact.agent);
             set_status(status);
-            show_console(false);
+            set_bubble("Gemmi", last_artifact.artifact[0] ? last_artifact.artifact : last_artifact.message, "");
+            show_console(true);
         } else {
             set_status("gemmi found no artifact");
-            show_console(false);
+            set_bubble("Gemmi", "No images shared yet.", "");
+            show_console(true);
         }
         play_state("reading", true);
         break;
@@ -629,11 +758,12 @@ static void on_agent_row(lv_event_t *event)
 static void on_bubble(lv_event_t *event)
 {
     LV_UNUSED(event);
+    if (pet_mode) { show_home(); return; }
     if (ask_foreground) {
         dismiss_ask();
     } else if (agents_mode == 2) {
         enter_agents_list();
-    } else if (agents_mode == 1) {
+    } else if (agents_mode == 1 || agents_mode >= 3) {
         show_home();
     }
 }
@@ -710,8 +840,240 @@ static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t w
     return label;
 }
 
+static lv_obj_t *pet_outline(lv_obj_t *parent, int x, int y, int width, int height)
+{
+    lv_obj_t *obj = lv_obj_create(parent);
+    lv_obj_set_pos(obj, x, y); lv_obj_set_size(obj, width, height);
+    lv_obj_set_style_pad_all(obj, 0, 0);
+    lv_obj_set_style_border_width(obj, 1, 0);
+    lv_obj_set_style_border_color(obj, lv_color_hex(0x35304E), 0);
+    lv_obj_set_style_radius(obj, 1, 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    return obj;
+}
+
+static void refresh_pet_look(void)
+{
+    if (!pet_glasses || !pet_crown) return;
+    unsigned equipped = gemmi_pet_stats()->equipped;
+    bool visible = sprite_mode == 0 || sprite_mode == 3;
+    lv_obj_add_flag(pet_glasses, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(pet_crown, LV_OBJ_FLAG_HIDDEN);
+    if (pet_bow) lv_obj_add_flag(pet_bow, LV_OBJ_FLAG_HIDDEN);
+    if (visible && equipped == GEMMI_PET_GLASSES + 1) {
+        lv_obj_remove_flag(pet_glasses, LV_OBJ_FLAG_HIDDEN);
+        /* The room uses the smaller native sprite; keep accessories proportional. */
+        if (sprite_mode == 0) {
+            lv_obj_set_pos(pet_glasses, 87, 76);
+            lv_obj_set_size(pet_glasses, 66, 16);
+            lv_obj_set_pos(lv_obj_get_child(pet_glasses, 0), 0, 0);
+            lv_obj_set_size(lv_obj_get_child(pet_glasses, 0), 21, 16);
+            lv_obj_set_pos(lv_obj_get_child(pet_glasses, 1), 45, 0);
+            lv_obj_set_size(lv_obj_get_child(pet_glasses, 1), 21, 16);
+            lv_obj_set_pos(lv_obj_get_child(pet_glasses, 2), 21, 7);
+            lv_obj_set_size(lv_obj_get_child(pet_glasses, 2), 24, 1);
+        } else {
+            lv_obj_set_pos(pet_glasses, 101, 50);
+            lv_obj_set_size(pet_glasses, 38, 10);
+            lv_obj_set_pos(lv_obj_get_child(pet_glasses, 0), 0, 0);
+            lv_obj_set_size(lv_obj_get_child(pet_glasses, 0), 12, 10);
+            lv_obj_set_pos(lv_obj_get_child(pet_glasses, 1), 26, 0);
+            lv_obj_set_size(lv_obj_get_child(pet_glasses, 1), 12, 10);
+            lv_obj_set_pos(lv_obj_get_child(pet_glasses, 2), 12, 4);
+            lv_obj_set_size(lv_obj_get_child(pet_glasses, 2), 14, 1);
+        }
+    }
+    if (visible && equipped == GEMMI_PET_CROWN + 1) {
+        lv_obj_remove_flag(pet_crown, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(pet_crown, 103, sprite_mode == 0 ? 8 : 12);
+    }
+    if (visible && equipped == GEMMI_PET_BOW + 1 && pet_bow) {
+        lv_obj_remove_flag(pet_bow, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(pet_bow, 108, sprite_mode == 0 ? 112 : 73);
+    }
+    static const uint32_t themes[] = {0x66998A, 0xB58297, 0x7399BD, 0x9282B3};
+    uint32_t frame = equipped >= GEMMI_PET_MINT + 1 && equipped <= GEMMI_PET_DUSK + 1 ? themes[equipped - GEMMI_PET_MINT - 1] : 0x888888;
+    if (bubble_obj) lv_obj_set_style_border_color(bubble_obj, lv_color_hex(frame), 0);
+    if (pet_badge) lv_obj_set_style_text_color(pet_badge, lv_color_hex(frame == 0x888888 ? 0xA799B2 : frame), 0);
+    /* GIF replacement creates a new topmost sibling; keep the accessory above it. */
+    lv_obj_move_foreground(pet_glasses);
+    lv_obj_move_foreground(pet_crown);
+    if (pet_bow) lv_obj_move_foreground(pet_bow);
+}
+
+#ifdef GEMMI_SYSTEM_MENLO
+#define PP(x,y) {(x)*4,(y)*4}
+#define PET_STROKE 3
+#define PET_SMALL_FONT (&gemmi_menlo_8)
+#else
+#define PP(x,y) {x,y}
+#define PET_STROKE 1
+#define PET_SMALL_FONT UI_MONO
+#endif
+static void pet_path(lv_obj_t *parent, const lv_point_precise_t *points, unsigned count, uint32_t colour)
+{
+    lv_obj_t *line = lv_line_create(parent);
+    lv_line_set_points(line, points, count);
+    lv_obj_set_style_line_width(line, PET_STROKE, 0);
+    lv_obj_set_style_line_color(line, lv_color_hex(colour), 0);
+    lv_obj_set_style_line_rounded(line, true, 0);
+    lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
+}
+static lv_obj_t *pet_caption(lv_obj_t *parent, const char *text, int x, int y, int width)
+{
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_style_text_font(label, PET_SMALL_FONT, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(0x77717E), 0);
+    lv_obj_set_pos(label, x, y); lv_obj_set_size(label, width, 12);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_label_set_text(label, text);
+    return label;
+}
+static void draw_shop_preview(lv_obj_t *preview, unsigned item)
+{
+    static const uint32_t palettes[4][3] = {
+        {0xC9E0D7,0x98BCAF,0x66998A}, {0xF1DBE4,0xD4ABBE,0xB58297},
+        {0xDDEBF4,0xAAC8DE,0x7399BD}, {0xE4DCF2,0xBDB0D3,0x9282B3}
+    };
+        if (item == 0) {
+            static const lv_point_precise_t specs[] = {PP(1,7),PP(8,7),PP(8,14),PP(1,14),PP(1,7),PP(8,7),PP(8,10),PP(14,10),PP(14,7),PP(21,7),PP(21,14),PP(14,14),PP(14,7)};
+            for (int lens = 0; lens < 2; lens++) {
+                lv_obj_t *glass = pet_outline(preview, lens ? 14 : 1, 7, 7, 7);
+                lv_obj_set_style_border_width(glass, 0, 0);
+                lv_obj_set_style_bg_color(glass, lv_color_hex(0xE4DCF2), 0);
+                lv_obj_set_style_bg_opa(glass, LV_OPA_COVER, 0);
+            }
+            pet_path(preview, specs, 13, 0x6D6487);
+        } else if (item == 1) {
+            static const lv_point_precise_t crown[] = {PP(1,6),PP(6,10),PP(11,2),PP(16,10),PP(21,6),PP(19,17),PP(3,17),PP(1,6)};
+            pet_path(preview, crown, 8, 0xB18B3B);
+            lv_obj_t *jewel = pet_outline(preview, 9, 11, 4, 4);
+            lv_obj_set_style_bg_color(jewel, lv_color_hex(0xD4ABBE), 0);
+            lv_obj_set_style_bg_opa(jewel, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_color(jewel, lv_color_hex(0xB18B3B), 0);
+        } else if (item >= GEMMI_PET_MINT && item <= GEMMI_PET_DUSK) {
+            lv_obj_t *room = pet_outline(preview, 1, 1, 20, 19);
+            lv_obj_set_style_bg_color(room, lv_color_hex(palettes[item - 2][0]), 0);
+            lv_obj_set_style_bg_opa(room, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_color(room, lv_color_hex(palettes[item - 2][2]), 0);
+            lv_obj_t *window = pet_outline(room, 2, 2, 6, 6);
+            lv_obj_set_style_bg_color(window, lv_color_white(), 0);
+            lv_obj_set_style_bg_opa(window, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_color(window, lv_color_hex(palettes[item - 2][1]), 0);
+            static const lv_point_precise_t tiny_gem[] = {PP(13,5),PP(10,10),PP(13,15),PP(16,10),PP(13,5)};
+            pet_path(room, tiny_gem, 5, palettes[item - 2][2]);
+            lv_obj_t *floor = pet_outline(room, 1, 16, 16, 1);
+            lv_obj_set_style_border_color(floor, lv_color_hex(palettes[item - 2][2]), 0);
+        } else if (item == GEMMI_PET_BOW) {
+            static const lv_point_precise_t bow[] = {PP(1,5),PP(11,10),PP(1,16),PP(1,5),PP(11,10),PP(21,5),PP(21,16),PP(11,10),PP(7,20),PP(11,17),PP(15,20)};
+            pet_path(preview, bow, 11, 0xB58297);
+            lv_obj_t *knot = pet_outline(preview, 9, 8, 4, 4);
+            lv_obj_set_style_bg_color(knot, lv_color_hex(0xD4ABBE), 0);
+            lv_obj_set_style_bg_opa(knot, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_color(knot, lv_color_hex(0xB58297), 0);
+        } else {
+            static const lv_point_precise_t cookie[] = {PP(5,3),PP(15,3),PP(20,8),PP(20,14),PP(15,19),PP(5,19),PP(1,14),PP(1,8),PP(5,3)};
+            pet_path(preview, cookie, 9, 0xB18B3B);
+            pet_outline(preview, 6, 7, 2, 2); pet_outline(preview, 13, 12, 2, 2);
+        }
+}
+
+static void init_compact_pet_hud(lv_obj_t *screen)
+{
+    lv_obj_t *shop_button = pet_outline(screen, 215, 2, 22, 23);
+    lv_obj_set_style_border_width(shop_button, 0, 0);
+    lv_obj_add_flag(shop_button, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(shop_button, on_shop, LV_EVENT_PRESSED, NULL);
+    /* Keep the touch target generous while matching the header's small type. */
+    lv_obj_t *bag_icon = pet_outline(shop_button, 5, 6, 9, 10);
+    lv_obj_set_style_border_width(bag_icon, 0, 0);
+    static const lv_point_precise_t bag[] = {PP(1,3),PP(7,3),PP(8,9),PP(0,9),PP(1,3)};
+    static const lv_point_precise_t handle[] = {PP(2,4),PP(2,1),PP(3,0),PP(5,0),PP(6,1),PP(6,4)};
+    pet_path(bag_icon, bag, 5, 0x77717E); pet_path(bag_icon, handle, 6, 0x77717E);
+
+    shop_panel = pet_outline(screen, 12, 171, 216, 105);
+    lv_obj_set_style_bg_color(shop_panel, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(shop_panel, LV_OPA_COVER, 0);
+    shop_title = pet_caption(shop_panel, "Little shop 1/2", 8, 5, 150);
+    lv_obj_t *next = pet_outline(shop_panel, 166, 1, 22, 19);
+    lv_obj_set_style_border_width(next, 0, 0);
+    lv_obj_add_flag(next, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(next, on_shop_next, LV_EVENT_PRESSED, NULL);
+    pet_caption(next, ">", 7, 2, 10);
+    lv_obj_t *close = pet_outline(shop_panel, 191, 1, 22, 19);
+    lv_obj_set_style_border_width(close, 0, 0);
+    lv_obj_add_flag(close, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(close, on_shop, LV_EVENT_PRESSED, NULL);
+    pet_caption(close, "x", 7, 2, 10);
+    for (unsigned i = 0; i < 4; i++) {
+        lv_obj_t *card = shop_cards[i] = pet_outline(shop_panel, 6 + (int)i * 52, 23, 47, 59);
+        lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+        lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(card, on_shop_item, LV_EVENT_PRESSED, (void *)(uintptr_t)i);
+        shop_previews[i] = pet_outline(card, 12, 4, 23, 21);
+        lv_obj_set_style_border_width(shop_previews[i], 0, 0);
+        shop_names[i] = pet_caption(card, "", 1, 28, 43);
+        lv_obj_set_style_text_align(shop_names[i], LV_TEXT_ALIGN_CENTER, 0);
+        shop_prices[i] = pet_caption(card, "", 1, 42, 43);
+        lv_obj_set_style_text_align(shop_prices[i], LV_TEXT_ALIGN_CENTER, 0);
+    }
+    shop_feedback = pet_caption(shop_panel, "Tap to buy / equip", 8, 88, 198);
+    lv_obj_set_style_text_align(shop_feedback, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_add_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
+}
+#undef PP
+
+static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
+{
+    init_compact_pet_hud(screen);
+    pet_badge = lv_label_create(screen);
+    lv_obj_set_pos(pet_badge, 126, 8);
+    lv_obj_set_size(pet_badge, 91, 12);
+#ifdef GEMMI_SYSTEM_MENLO
+    lv_obj_set_style_text_font(pet_badge, &gemmi_menlo_8, 0);
+#else
+    lv_obj_set_style_text_font(pet_badge, UI_MONO, 0);
+#endif
+    lv_obj_set_style_text_align(pet_badge, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_long_mode(pet_badge, LV_LABEL_LONG_DOT);
+    lv_obj_add_flag(pet_badge, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(pet_badge, on_shop, LV_EVENT_PRESSED, NULL);
+    pet_glasses = pet_outline(scene, 87, 76, 66, 16);
+    lv_obj_set_style_border_width(pet_glasses, 0, 0);
+    pet_outline(pet_glasses, 0, 0, 21, 16);
+    pet_outline(pet_glasses, 45, 0, 21, 16);
+    pet_outline(pet_glasses, 21, 7, 24, 1);
+    pet_crown = lv_line_create(scene);
+#ifdef GEMMI_SYSTEM_MENLO
+#define CP(x,y) {(x)*4,(y)*4}
+#else
+#define CP(x,y) {x,y}
+#endif
+    static const lv_point_precise_t crown[] = {CP(0,4),CP(8,9),CP(17,0),CP(26,9),CP(34,4),CP(30,18),CP(4,18),CP(0,4)};
+    lv_line_set_points(pet_crown, crown, 8);
+    lv_obj_set_style_line_color(pet_crown, lv_color_hex(0xB18B3B), 0);
+#ifdef GEMMI_SYSTEM_MENLO
+    lv_obj_set_style_line_width(pet_crown, 6, 0);
+#else
+    lv_obj_set_style_line_width(pet_crown, 2, 0);
+#endif
+    lv_obj_remove_flag(pet_crown, LV_OBJ_FLAG_CLICKABLE);
+    pet_bow = pet_outline(scene, 108, 112, 24, 16);
+    lv_obj_set_style_border_width(pet_bow, 0, 0);
+    static const lv_point_precise_t ribbon[] = {CP(1,3),CP(12,8),CP(1,13),CP(1,3),CP(12,8),CP(23,3),CP(23,13),CP(12,8),CP(8,16),CP(12,13),CP(16,16)};
+#undef CP
+    pet_path(pet_bow, ribbon, 11, 0xB58297);
+    lv_obj_t *knot = pet_outline(pet_bow, 10, 6, 4, 4);
+    lv_obj_set_style_bg_color(knot, lv_color_hex(0xD4ABBE), 0);
+    lv_obj_set_style_bg_opa(knot, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(knot, lv_color_hex(0xB58297), 0);
+    refresh_pet_look();
+}
+
 void gemmi_ui_init(lv_display_t *display)
 {
+    gemmi_pet_init();
     lv_obj_t *screen = lv_display_get_screen_active(display);
     lv_obj_set_style_bg_color(screen, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
@@ -799,6 +1161,9 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
 
     gif = lv_gif_create(scene);
+    lv_obj_add_flag(gif, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(gif, on_pet, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(gif, on_rest, LV_EVENT_LONG_PRESSED, NULL);
     lv_image_set_antialias(gif, false);
     lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
     lv_gif_set_src(gif, gemmi_anims[GEMMI_ANIM_IDLE].dsc);
@@ -863,7 +1228,7 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_line_width(badge_icon, 2, 0);
     lv_obj_set_style_line_color(badge_icon, lv_color_hex(0xA799B2), 0);
 #endif
-    make_label_upright(status_label, SCREEN_W - 24, 12);
+    make_label_upright(status_label, 90, 12);
     lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_LEFT, 0);
 
     for (uint32_t index = 0; index < 3; index++) {
@@ -871,6 +1236,15 @@ void gemmi_ui_init(lv_display_t *display)
                                            64, 24, (int)index);
         dock_buttons[index] = lv_obj_get_parent(dock_labels[index]);
     }
+    ask_back = pet_outline(screen, 12, 28, 40, 19);
+    lv_obj_set_style_border_color(ask_back, lv_color_hex(0x888888), 0);
+    lv_obj_add_flag(ask_back, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(ask_back, on_ask_back, LV_EVENT_PRESSED, NULL);
+    lv_obj_t *back_caption = pet_caption(ask_back, "Back", 4, 3, 30);
+    lv_obj_set_style_text_align(back_caption, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
+    init_pet_decorations(screen, scene);
+    refresh_pet_badge();
     show_home();
 }
 
@@ -913,6 +1287,10 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
 {
     if (!gif || !headline_label || !message_label || !queue_label) return;
     remember_agent(event);
+    uint32_t previous_level = gemmi_pet_level();
+    bool rewarded = !strcmp(event->kind, "status") &&
+                    gemmi_pet_event(event->agent, event->state, event->id);
+    refresh_pet_badge();
 
     if (strcmp(event->kind, "ask") == 0) {
         pending_ask = *event;
@@ -924,6 +1302,8 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
         enter_ask();
         return;
     }
+
+    if (pet_mode) render_pet_room(rewarded ? "+25 XP / +5 gems" : NULL);
 
     char status[80];
     if (strcmp(event->agent, "gemmi") == 0 && event->message[0]) {
@@ -958,5 +1338,16 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
         show_console(true);
         set_bubble(headline, event->message, "attention needed");
     }
-    play_state(event->state, false);
+    if (rewarded && !ask_foreground && !ask_pending) {
+        set_status(gemmi_pet_level() > previous_level ? "Level up!" : "Task complete");
+        set_bubble("Gemmi", gemmi_pet_level() > previous_level ?
+                   "Level up! +25 XP, +5 gems and a 10 gem bonus." :
+                   "Nice work! +25 XP / +5 gems. Gemmi is growing with you.", "");
+    }
+    play_state(event->state, rewarded);
+    if (rewarded && gemmi_pet_level() > previous_level && !ask_foreground && !ask_pending) {
+        /* Let any queued task animation finish swapping before the celebration. */
+        lv_timer_t *celebration = lv_timer_create(level_up_celebration, 350, NULL);
+        lv_timer_set_repeat_count(celebration, 1);
+    }
 }

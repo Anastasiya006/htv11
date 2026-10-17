@@ -10,6 +10,7 @@
 #include <SDL.h>
 #include "gemmi_bridge.h"
 #include "gemmi_ui.h"
+#include "gemmi_pet.h"
 #include "lvgl.h"
 
 #ifdef GEMMI_SYSTEM_MENLO
@@ -48,7 +49,7 @@ static void post_event(const char *kind, const char *agent, const char *state,
     gemmi_ui_show_event(&event);
 }
 
-static void post_ask(void)
+static void post_ask(bool three_choices)
 {
     gemmi_event_t event;
     memset(&event, 0, sizeof(event));
@@ -59,7 +60,8 @@ static void post_ask(void)
     copy_text(event.message, sizeof(event.message), "Run the visual checks?");
     copy_text(event.choices[0], GEMMI_CHOICE_LEN, "allow");
     copy_text(event.choices[1], GEMMI_CHOICE_LEN, "review");
-    event.choice_count = 2;
+    event.choice_count = three_choices ? 3 : 2;
+    if (three_choices) copy_text(event.choices[2], GEMMI_CHOICE_LEN, "deny");
     gemmi_ui_show_event(&event);
 }
 
@@ -74,12 +76,26 @@ static void seed_agents(void)
 static void show_scene(const char *scene)
 {
     if (strcmp(scene, "home") == 0) return;
+    if (strcmp(scene, "level-up") == 0) {
+        gemmi_pet_test_level_ready();
+        post_event("status", "demo", "working", "Finishing a task", "");
+        post_event("status", "demo", "success", "Task complete", "");
+        return;
+    }
+    if (strcmp(scene, "reward") == 0) {
+        post_event("status", "demo", "working", "Finishing a task", "");
+        post_event("status", "demo", "success", "Task complete", "");
+        return;
+    }
+    if (strcmp(scene, "pet") == 0) { gemmi_ui_open_pet(); return; }
     if (strcmp(scene, "thinking") == 0) {
         post_event("status", "codex", "thinking", "planning the layout", "");
     } else if (strcmp(scene, "working") == 0) {
         post_event("status", "codex", "working", "editing gemmi_ui.c", "");
     } else if (strcmp(scene, "ask") == 0) {
-        post_ask();
+        post_ask(false);
+    } else if (strcmp(scene, "ask-three") == 0) {
+        post_ask(true);
     } else if (strcmp(scene, "artifact") == 0) {
         post_event("artifact", "codex", "reading", "", "screenshots/layout.png");
     } else if (strcmp(scene, "agents") == 0) {
@@ -102,6 +118,15 @@ static int hotkey(void *user_data, SDL_Event *event)
     case SDLK_3: show_scene("ask"); break;
     case SDLK_4: show_scene("artifact"); break;
     case SDLK_5: show_scene("agents"); break;
+    case SDLK_7:
+        gemmi_pet_test_level_ready();
+        post_event("status", "demo", "working", "Finishing a task", "");
+        post_event("status", "demo", "success", "Task complete", "");
+        break;
+    case SDLK_6:
+        post_event("status", "demo", "working", "Finishing a task", "");
+        post_event("status", "demo", "success", "Task complete", "");
+        break;
     case SDLK_o: gemmi_ui_offline(true); break;
     case SDLK_i: gemmi_ui_offline(false); break;
     default: break;
@@ -119,8 +144,8 @@ void gemmi_bridge_answer(int event_id, const char *choice)
 
 static void print_usage(const char *program)
 {
-    printf("Usage: %s [--scene home|thinking|working|ask|artifact|agents|offline]\n"
-           "Hotkeys: 1 thinking, 2 working, 3 ask, 4 artifact, 5 agents, O offline, I online\nCapture: --capture path.bmp [--tap x,y ...] (logical coordinates)\n",
+    printf("Usage: %s [--scene home|thinking|working|ask|artifact|agents|offline|pet|reward]\n"
+           "Hotkeys: 1 thinking, 2 working, 3 ask, 4 artifact, 5 agents, 6 demo task reward, 7 demo level-up, O offline, I online\nTesting: --test-gems amount\nCapture: --capture path.bmp [--tap x,y ...] (logical coordinates)\n",
            program);
 }
 
@@ -128,9 +153,15 @@ int main(int argc, char **argv)
 {
     const char *scene = "agents";
     const char *capture = NULL;
+    unsigned test_gems = 0;
+    bool set_test_gems = false;
     int tap_x[8], tap_y[8], tap_count = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--scene") && i + 1 < argc) scene = argv[++i];
+        else if (!strcmp(argv[i], "--test-gems") && i + 1 < argc) {
+            if (sscanf(argv[++i], "%u", &test_gems) != 1 || test_gems > 1000000) return 2;
+            set_test_gems = true;
+        }
         else if (!strcmp(argv[i], "--capture") && i + 1 < argc) capture = argv[++i];
         else if (!strcmp(argv[i], "--tap") && i + 1 < argc && tap_count < 8) {
             if (sscanf(argv[++i], "%d,%d", &tap_x[tap_count], &tap_y[tap_count]) != 2) return 2;
@@ -151,6 +182,11 @@ int main(int argc, char **argv)
     lv_indev_set_display(mouse, display);
     SDL_AddEventWatch(hotkey, NULL);
 
+    if (set_test_gems) {
+        gemmi_pet_init();
+        gemmi_pet_test_gems(test_gems);
+        if (!gemmi_pet_save_ok()) { fprintf(stderr, "Could not save test gems.\n"); return 1; }
+    }
     gemmi_ui_init(display);
     show_scene(scene);
 

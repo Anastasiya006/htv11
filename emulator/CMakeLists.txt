@@ -29,6 +29,7 @@ add_subdirectory("${GEMMI_LVGL_DIR}" "${CMAKE_BINARY_DIR}/lvgl")
 
 add_executable(gemmi-emulator
     emulator.c
+    "${GEMMI_MAIN_DIR}/gemmi_pet.c"
     "${GEMMI_MAIN_DIR}/gemmi_ui.c"
     "${GEMMI_MAIN_DIR}/gemmi_anims.c"
 )

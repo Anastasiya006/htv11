@@ -23,3 +23,6 @@ void gemmi_ui_show_event(const gemmi_event_t *event);
 
 /* Show or clear the "offline" status line when the bridge is unreachable. */
 void gemmi_ui_offline(bool offline);
+
+/* Open the pet room unless an agent question needs an answer. */
+void gemmi_ui_open_pet(void);

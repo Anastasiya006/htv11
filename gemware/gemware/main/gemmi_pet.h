@@ -7,7 +7,7 @@ typedef struct {
     uint32_t energy, mood;
 } gemmi_pet_stats_t;
 typedef struct { const char *name; const char *description; uint32_t cost; } gemmi_pet_item_t;
-enum { GEMMI_PET_GLASSES, GEMMI_PET_CROWN, GEMMI_PET_MINT, GEMMI_PET_ROSE, GEMMI_PET_SKY, GEMMI_PET_DUSK, GEMMI_PET_BOW, GEMMI_PET_ITEM_COUNT };
+enum { GEMMI_PET_GLASSES, GEMMI_PET_CROWN, GEMMI_PET_HALO, GEMMI_PET_ANTENNA, GEMMI_PET_SCARF, GEMMI_PET_HORNS, GEMMI_PET_BOW, GEMMI_PET_ITEM_COUNT };
 extern const gemmi_pet_item_t gemmi_pet_items[GEMMI_PET_ITEM_COUNT];
 void gemmi_pet_init(void);
 const gemmi_pet_stats_t *gemmi_pet_stats(void);

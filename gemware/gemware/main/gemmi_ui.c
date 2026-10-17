@@ -99,6 +99,7 @@ static unsigned shop_page;
 static const int shop_catalog[8] = {0, 1, 2, 7, 3, 4, 5, 6};
 static void draw_shop_preview(lv_obj_t *preview, unsigned item);
 static lv_obj_t *pet_glasses, *pet_crown, *pet_bow;
+static lv_obj_t *pet_halo, *pet_antenna, *pet_scarf, *pet_horns;
 static int pet_mode; /* compact shop overlay open */
 static void on_pet(lv_event_t *event);
 static void on_rest(lv_event_t *event);
@@ -525,7 +526,7 @@ static void render_pet_room(const char *feedback)
         int item = shop_catalog[shop_page * 4 + i];
         if (item < 0) { lv_obj_add_flag(shop_cards[i], LV_OBJ_FLAG_HIDDEN); continue; }
         lv_obj_remove_flag(shop_cards[i], LV_OBJ_FLAG_HIDDEN);
-        const char *names[] = {"Specs", "Crown", "Mint", "Rose", "Sky", "Dusk", "Bow", "Snack"};
+        const char *names[] = {"Specs", "Crown", "Halo", "Stalk", "Scarf", "Horns", "Bow", "Snack"};
         lv_label_set_text(shop_names[i], names[item]);
         lv_obj_clean(shop_previews[i]);
         draw_shop_preview(shop_previews[i], (unsigned)item);
@@ -806,6 +807,10 @@ static void refresh_pet_look(void)
     lv_obj_add_flag(pet_glasses, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(pet_crown, LV_OBJ_FLAG_HIDDEN);
     if (pet_bow) lv_obj_add_flag(pet_bow, LV_OBJ_FLAG_HIDDEN);
+    if (pet_halo) lv_obj_add_flag(pet_halo, LV_OBJ_FLAG_HIDDEN);
+    if (pet_antenna) lv_obj_add_flag(pet_antenna, LV_OBJ_FLAG_HIDDEN);
+    if (pet_scarf) lv_obj_add_flag(pet_scarf, LV_OBJ_FLAG_HIDDEN);
+    if (pet_horns) lv_obj_add_flag(pet_horns, LV_OBJ_FLAG_HIDDEN);
     if (visible && equipped == GEMMI_PET_GLASSES + 1) {
         lv_obj_remove_flag(pet_glasses, LV_OBJ_FLAG_HIDDEN);
         /* The room uses the smaller native sprite; keep accessories proportional. */
@@ -837,14 +842,30 @@ static void refresh_pet_look(void)
         lv_obj_remove_flag(pet_bow, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_pos(pet_bow, 108, sprite_mode == 0 ? 112 : 73);
     }
-    static const uint32_t themes[] = {0x66998A, 0xB58297, 0x7399BD, 0x9282B3};
-    uint32_t frame = equipped >= GEMMI_PET_MINT + 1 && equipped <= GEMMI_PET_DUSK + 1 ? themes[equipped - GEMMI_PET_MINT - 1] : 0x888888;
-    if (bubble_obj) lv_obj_set_style_border_color(bubble_obj, lv_color_hex(frame), 0);
-    if (pet_badge) lv_obj_set_style_text_color(pet_badge, lv_color_hex(frame == 0x888888 ? 0xA799B2 : frame), 0);
-    /* GIF replacement creates a new topmost sibling; keep the accessory above it. */
+    if (visible && equipped == GEMMI_PET_HALO + 1 && pet_halo) {
+        lv_obj_remove_flag(pet_halo, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(pet_halo, sprite_mode == 0 ? 100 : 100, sprite_mode == 0 ? 2 : 0);
+    }
+    if (visible && equipped == GEMMI_PET_ANTENNA + 1 && pet_antenna) {
+        lv_obj_remove_flag(pet_antenna, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(pet_antenna, sprite_mode == 0 ? 114 : 114, sprite_mode == 0 ? 0 : 0);
+    }
+    if (visible && equipped == GEMMI_PET_SCARF + 1 && pet_scarf) {
+        lv_obj_remove_flag(pet_scarf, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(pet_scarf, 86, sprite_mode == 0 ? 100 : 64);
+    }
+    if (visible && equipped == GEMMI_PET_HORNS + 1 && pet_horns) {
+        lv_obj_remove_flag(pet_horns, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(pet_horns, sprite_mode == 0 ? 58 : 72, sprite_mode == 0 ? 4 : 2);
+    }
+    /* GIF replacement creates a new topmost sibling; keep accessories above it. */
     lv_obj_move_foreground(pet_glasses);
     lv_obj_move_foreground(pet_crown);
     if (pet_bow) lv_obj_move_foreground(pet_bow);
+    if (pet_halo) lv_obj_move_foreground(pet_halo);
+    if (pet_antenna) lv_obj_move_foreground(pet_antenna);
+    if (pet_scarf) lv_obj_move_foreground(pet_scarf);
+    if (pet_horns) lv_obj_move_foreground(pet_horns);
 }
 
 #ifdef GEMMI_SYSTEM_MENLO
@@ -877,10 +898,6 @@ static lv_obj_t *pet_caption(lv_obj_t *parent, const char *text, int x, int y, i
 }
 static void draw_shop_preview(lv_obj_t *preview, unsigned item)
 {
-    static const uint32_t palettes[4][3] = {
-        {0xC9E0D7,0x98BCAF,0x66998A}, {0xF1DBE4,0xD4ABBE,0xB58297},
-        {0xDDEBF4,0xAAC8DE,0x7399BD}, {0xE4DCF2,0xBDB0D3,0x9282B3}
-    };
         if (item == 0) {
             static const lv_point_precise_t specs[] = {PP(1,7),PP(8,7),PP(8,14),PP(1,14),PP(1,7),PP(8,7),PP(8,10),PP(14,10),PP(14,7),PP(21,7),PP(21,14),PP(14,14),PP(14,7)};
             for (int lens = 0; lens < 2; lens++) {
@@ -897,19 +914,39 @@ static void draw_shop_preview(lv_obj_t *preview, unsigned item)
             lv_obj_set_style_bg_color(jewel, lv_color_hex(0xD4ABBE), 0);
             lv_obj_set_style_bg_opa(jewel, LV_OPA_COVER, 0);
             lv_obj_set_style_border_color(jewel, lv_color_hex(0xB18B3B), 0);
-        } else if (item >= GEMMI_PET_MINT && item <= GEMMI_PET_DUSK) {
-            lv_obj_t *room = pet_outline(preview, 1, 1, 20, 19);
-            lv_obj_set_style_bg_color(room, lv_color_hex(palettes[item - 2][0]), 0);
-            lv_obj_set_style_bg_opa(room, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_color(room, lv_color_hex(palettes[item - 2][2]), 0);
-            lv_obj_t *window = pet_outline(room, 2, 2, 6, 6);
-            lv_obj_set_style_bg_color(window, lv_color_white(), 0);
-            lv_obj_set_style_bg_opa(window, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_color(window, lv_color_hex(palettes[item - 2][1]), 0);
-            static const lv_point_precise_t tiny_gem[] = {PP(13,5),PP(10,10),PP(13,15),PP(16,10),PP(13,5)};
-            pet_path(room, tiny_gem, 5, palettes[item - 2][2]);
-            lv_obj_t *floor = pet_outline(room, 1, 16, 16, 1);
-            lv_obj_set_style_border_color(floor, lv_color_hex(palettes[item - 2][2]), 0);
+        } else if (item == GEMMI_PET_HALO) {
+            static const lv_point_precise_t halo[] = {PP(4,9),PP(7,6),PP(11,5),PP(15,6),PP(18,9),PP(15,12),PP(11,13),PP(7,12),PP(4,9)};
+            pet_path(preview, halo, 9, 0xC9A227);
+        } else if (item == GEMMI_PET_ANTENNA) {
+            static const lv_point_precise_t stalk[] = {PP(11,20),PP(11,8)};
+            pet_path(preview, stalk, 2, 0x6D6487);
+            lv_obj_t *bob = pet_outline(preview, 9, 3, 5, 5);
+            lv_obj_set_style_radius(bob, LV_RADIUS_CIRCLE, 0);
+            lv_obj_set_style_bg_color(bob, lv_color_hex(0xD4556B), 0);
+            lv_obj_set_style_bg_opa(bob, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(bob, 0, 0);
+            static const lv_point_precise_t wave1[] = {PP(5,7),PP(7,4),PP(9,7)};
+            static const lv_point_precise_t wave2[] = {PP(13,7),PP(15,4),PP(17,7)};
+            pet_path(preview, wave1, 3, 0x7399BD); pet_path(preview, wave2, 3, 0x7399BD);
+        } else if (item == GEMMI_PET_SCARF) {
+            static const lv_point_precise_t scarf[] = {PP(2,8),PP(8,5),PP(14,5),PP(20,8),PP(20,13),PP(14,16),PP(8,16),PP(2,13),PP(2,8)};
+            pet_path(preview, scarf, 9, 0xB58297);
+            lv_obj_t *tail = pet_outline(preview, 15, 12, 4, 7);
+            lv_obj_set_style_bg_color(tail, lv_color_hex(0xF1DBE4), 0);
+            lv_obj_set_style_bg_opa(tail, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_color(tail, lv_color_hex(0xB58297), 0);
+        } else if (item == GEMMI_PET_HORNS) {
+            static const lv_point_precise_t horn_l[] = {PP(2,14),PP(4,4),PP(8,11),PP(2,14)};
+            static const lv_point_precise_t horn_r[] = {PP(14,11),PP(18,4),PP(20,14),PP(14,11)};
+            pet_path(preview, horn_l, 4, 0x8A4A58); pet_path(preview, horn_r, 4, 0x8A4A58);
+            lv_obj_t *fill_l = pet_outline(preview, 4, 9, 3, 5);
+            lv_obj_set_style_bg_color(fill_l, lv_color_hex(0xE4BCC6), 0);
+            lv_obj_set_style_bg_opa(fill_l, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(fill_l, 0, 0);
+            lv_obj_t *fill_r = pet_outline(preview, 15, 9, 3, 5);
+            lv_obj_set_style_bg_color(fill_r, lv_color_hex(0xE4BCC6), 0);
+            lv_obj_set_style_bg_opa(fill_r, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(fill_r, 0, 0);
         } else if (item == GEMMI_PET_BOW) {
             static const lv_point_precise_t bow[] = {PP(1,5),PP(11,10),PP(1,16),PP(1,5),PP(11,10),PP(21,5),PP(21,16),PP(11,10),PP(7,20),PP(11,17),PP(15,20)};
             pet_path(preview, bow, 11, 0xB58297);
@@ -1004,6 +1041,37 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     lv_obj_set_style_bg_color(knot, lv_color_hex(0xD4ABBE), 0);
     lv_obj_set_style_bg_opa(knot, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(knot, lv_color_hex(0xB58297), 0);
+    /* Wearables: halo ring, antenna, scarf, horns. */
+    pet_halo = pet_outline(scene, 100, 0, 40, 10);
+    lv_obj_set_style_bg_opa(pet_halo, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_radius(pet_halo, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_color(pet_halo, lv_color_hex(0xC9A227), 0);
+    lv_obj_set_style_border_width(pet_halo, 2, 0);
+    pet_antenna = pet_outline(scene, 115, 0, 12, 14);
+    lv_obj_set_style_border_width(pet_antenna, 0, 0);
+    static const lv_point_precise_t ant_stem[] = {{6,13},{6,5}};
+    pet_path(pet_antenna, ant_stem, 2, 0x6D6487);
+    lv_obj_t *ant_bob = pet_outline(pet_antenna, 3, 0, 6, 6);
+    lv_obj_set_style_radius(ant_bob, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(ant_bob, lv_color_hex(0xD4556B), 0);
+    lv_obj_set_style_bg_opa(ant_bob, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(ant_bob, 0, 0);
+    pet_scarf = pet_outline(scene, 86, 98, 68, 16);
+    lv_obj_set_style_border_width(pet_scarf, 0, 0);
+    lv_obj_t *band = pet_outline(pet_scarf, 0, 0, 68, 8);
+    lv_obj_set_style_bg_color(band, lv_color_hex(0xF1DBE4), 0);
+    lv_obj_set_style_bg_opa(band, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(band, lv_color_hex(0xB58297), 0);
+    lv_obj_t *tail = pet_outline(pet_scarf, 46, 5, 10, 11);
+    lv_obj_set_style_bg_color(tail, lv_color_hex(0xF1DBE4), 0);
+    lv_obj_set_style_bg_opa(tail, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(tail, lv_color_hex(0xB58297), 0);
+    pet_horns = pet_outline(scene, 58, 2, 124, 18);
+    lv_obj_set_style_border_width(pet_horns, 0, 0);
+    static const lv_point_precise_t horn_l[] = {{0,16},{4,0},{12,14},{0,16}};
+    static const lv_point_precise_t horn_r[] = {{112,14},{120,0},{124,16},{112,14}};
+    pet_path(pet_horns, horn_l, 4, 0x8A4A58);
+    pet_path(pet_horns, horn_r, 4, 0x8A4A58);
     refresh_pet_look();
 }
 

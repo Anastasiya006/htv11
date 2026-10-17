@@ -10,10 +10,10 @@
 const gemmi_pet_item_t gemmi_pet_items[] = {
     {"Glasses", "A little scholar look.", 15},
     {"Crown", "Royalty, one task at a time.", 35},
-    {"Mint theme", "A fresh mint console theme.", 20},
-    {"Rose theme", "A soft rose console theme.", 20},
-    {"Sky theme", "A pale blue console theme.", 25},
-    {"Dusk theme", "A warm violet console theme.", 30},
+    {"Halo", "On best behaviour.", 20},
+    {"Antenna", "Always listening for agents.", 20},
+    {"Scarf", "Keeps the circuits warm.", 25},
+    {"Horns", "Chaos mode engaged.", 30},
     {"Ribbon bow", "A rosy ribbon for Gemmi.", 25},
 };
 /* Versioned, fixed-size save; event high-water marks survive restarts. */

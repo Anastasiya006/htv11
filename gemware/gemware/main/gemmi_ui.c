@@ -1175,8 +1175,12 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_border_color(store_button, lv_color_hex(0x888888), 0);
     lv_obj_add_flag(store_button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(store_button, on_shop, LV_EVENT_PRESSED, NULL);
-    lv_obj_t *store_caption = pet_caption(store_button, "shop", 5, 6, 30);
-    lv_obj_set_style_text_align(store_caption, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_t *bag_icon = pet_outline(store_button, 14, 6, 9, 10);
+    lv_obj_set_style_border_width(bag_icon, 0, 0);
+    static const lv_point_precise_t bag[] = {{1,3},{7,3},{8,9},{0,9},{1,3}};
+    static const lv_point_precise_t handle[] = {{2,4},{2,1},{3,0},{5,0},{6,1},{6,4}};
+    pet_path(bag_icon, bag, 5, 0x77717E);
+    pet_path(bag_icon, handle, 6, 0x77717E);
     ask_back = pet_outline(screen, 12, 28, 40, 19);
     lv_obj_set_style_border_color(ask_back, lv_color_hex(0x888888), 0);
     lv_obj_add_flag(ask_back, LV_OBJ_FLAG_CLICKABLE);

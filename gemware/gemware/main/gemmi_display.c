@@ -164,26 +164,37 @@ static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
         data->state = LV_INDEV_STATE_RELEASED;
     }
 
-    /* Debug: drop a dot at the mapped touch point to verify alignment. */
+    /* Debug: a tiny diamond Gemmi marks the mapped touch point, pulsing
+     * blue <-> purple while the panel is held, hidden on release. */
     static lv_obj_t *dot;
+    static unsigned pulse;
     if (data->state == LV_INDEV_STATE_PRESSED) {
         if (!dot) {
             dot = lv_obj_create(lv_layer_top());
-            lv_obj_set_size(dot, 12, 12);
-            lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-            lv_obj_set_style_bg_color(dot, lv_color_hex(0xE03030), 0);
+            lv_obj_set_size(dot, 10, 10);
             lv_obj_set_style_border_width(dot, 0, 0);
+            lv_obj_set_style_shadow_width(dot, 0, 0);
+            lv_obj_set_style_transform_rotation(dot, 450, 0);
+            lv_obj_set_style_transform_pivot_x(dot, 5, 0);
+            lv_obj_set_style_transform_pivot_y(dot, 5, 0);
             lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
         }
         /* LVGL rotates indev points by the display rotation (180), so the
          * on-screen hit lands at (W-1-x, H-1-y). Show that point. */
-        lv_obj_set_pos(dot, LCD_H_RES - 1 - data->point.x - 6,
-                          LCD_V_RES - 1 - data->point.y - 6);
+        lv_obj_set_pos(dot, LCD_H_RES - 1 - data->point.x - 5,
+                          LCD_V_RES - 1 - data->point.y - 5);
         ESP_LOGI(TAG, "touch raw %d,%d -> hit %d,%d",
                  (int)touchpad_x[0], (int)touchpad_y[0],
                  LCD_H_RES - 1 - data->point.x, LCD_V_RES - 1 - data->point.y);
+        pulse = (pulse + 2) & 0x3F;
+        lv_color_t c = lv_color_mix(lv_color_hex(0x3A6AE4),
+                                    lv_color_hex(0x8B3FD9),
+                                    pulse <= 32 ? pulse * 8 : (63 - pulse) * 8);
+        lv_obj_set_style_bg_color(dot, c, 0);
         lv_obj_remove_flag(dot, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(dot);
+    } else if (dot) {
+        lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
     }
 }
 

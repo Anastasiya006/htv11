@@ -417,6 +417,18 @@ static void remember_agent(const gemmi_event_t *event)
     }
 }
 
+void gemmi_ui_offline(bool offline)
+{
+    static bool was_offline;
+    if (!status_label || offline == was_offline) return;
+    was_offline = offline;
+    if (offline) {
+        set_status("offline - still holding your asks");
+    } else {
+        set_status("gemmi is back online");
+    }
+}
+
 void gemmi_ui_show_event(const gemmi_event_t *event)
 {
     if (!gif || !headline_label || !message_label || !queue_label) return;

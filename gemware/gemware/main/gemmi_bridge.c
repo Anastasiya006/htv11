@@ -195,6 +195,7 @@ static void gemmi_bridge_task(void *arg)
     }
 #endif
     bool just_shown = false;
+    int poll_failures = 0;
     while (true) {
         gemmi_device_msg_t outgoing;
         /* After displaying an event, poll again quickly so a burst of queued
@@ -231,8 +232,19 @@ static void gemmi_bridge_task(void *arg)
         if (error != ESP_OK) {
             ESP_LOGD(TAG, "bridge unavailable: %s", esp_err_to_name(error));
             reset_client();
+            if (++poll_failures == 3) {
+                gemmi_display_lock();
+                gemmi_ui_offline(true);
+                gemmi_display_unlock();
+            }
             continue;
         }
+        if (poll_failures >= 3) {
+            gemmi_display_lock();
+            gemmi_ui_offline(false);
+            gemmi_display_unlock();
+        }
+        poll_failures = 0;
         if (status != 200 || response.length == 0) {
             just_shown = false;
             continue;

@@ -435,6 +435,7 @@ static void set_sprite_small(void)
 
 static void enter_agents_list(void)
 {
+    stop_monitor();
     agents_mode = 1;
     if (store_button) lv_obj_add_flag(store_button, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(scene_obj, 250);
@@ -520,8 +521,8 @@ static void show_agent_detail(void)
     set_dock_caption(0, "back");
     set_dock_caption(1, "next");
     set_dock_caption(2, "");
-    /* Working agent: alternate between working and monitoring animations. */
-    if (!strcmp(entry->state, "working") && !monitor_timer) {
+    /* Watching an agent: alternate working and monitoring animations. */
+    if (!monitor_timer) {
         monitor_phase = 0;
         monitor_timer = lv_timer_create(monitor_swap, 2600, NULL);
     }
@@ -941,7 +942,7 @@ static void refresh_pet_look(void)
     }
     if (visible && equipped == GEMMI_PET_HORNS + 1 && pet_horns) {
         lv_obj_remove_flag(pet_horns, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_pos(pet_horns, sprite_mode == 0 ? 40 : 60, sprite_mode == 0 ? 0 : 2);
+        lv_obj_set_pos(pet_horns, sprite_mode == 0 ? 58 : 60, sprite_mode == 0 ? 14 : 2);
     }
     /* GIF replacement creates a new topmost sibling; keep accessories above it. */
     lv_obj_move_foreground(pet_glasses);
@@ -1151,12 +1152,12 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     lv_obj_set_style_bg_color(tail, lv_color_hex(0xF1DBE4), 0);
     lv_obj_set_style_bg_opa(tail, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(tail, lv_color_hex(0xB58297), 0);
-    pet_horns = pet_outline(scene, 34, 18, 172, 22);
+    pet_horns = pet_outline(scene, 58, 14, 124, 24);
     lv_obj_set_style_border_width(pet_horns, 0, 0);
     /* Headphones: band arc + two earcup squares hugging the temples. */
-    static const lv_point_precise_t hp_band[] = {{4,16},{12,2},{86,0},{160,2},{168,16}};
-    static const lv_point_precise_t hp_cup_l[] = {{0,8},{0,20},{12,20},{12,8},{0,8}};
-    static const lv_point_precise_t hp_cup_r[] = {{160,8},{160,20},{172,20},{172,8},{160,8}};
+    static const lv_point_precise_t hp_band[] = {{4,16},{10,2},{62,0},{114,2},{120,16}};
+    static const lv_point_precise_t hp_cup_l[] = {{0,8},{0,22},{12,22},{12,8},{0,8}};
+    static const lv_point_precise_t hp_cup_r[] = {{112,8},{112,22},{124,22},{124,8},{112,8}};
     pet_path(pet_horns, hp_band, 5, 0x8A4A58);
     pet_path(pet_horns, hp_cup_l, 5, 0x8A4A58);
     pet_path(pet_horns, hp_cup_r, 5, 0x8A4A58);

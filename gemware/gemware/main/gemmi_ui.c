@@ -113,28 +113,61 @@ static void make_label_upright(lv_obj_t *label, int16_t width, int16_t height)
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 }
 
+#define SCENE_W 226
+#define SCENE_H 238
+#define GIF_SIZE 196
+
+/* Sprite placement: 0 = big centred, 1 = corner badge, 2 = detail left. */
+static int sprite_mode;
+
+static void apply_sprite_mode(void)
+{
+    if (sprite_mode == 1) {
+        lv_obj_set_size(gif, 44, 44);
+        lv_image_set_scale(gif, 44 * 256 / 96);
+        lv_obj_align(gif, LV_ALIGN_TOP_LEFT, 4, 4);
+    } else if (sprite_mode == 2) {
+        lv_obj_set_size(gif, 96, 96);
+        lv_image_set_scale(gif, 256);
+        lv_obj_align(gif, LV_ALIGN_TOP_LEFT, 4, 40);
+    } else {
+        lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
+        lv_image_set_scale(gif, GIF_SIZE * 256 / 96);
+        lv_obj_center(gif);
+    }
+}
+
+/* Never call lv_gif_set_src: if the new draw buffer fails to allocate the
+ * widget is left with draw_buf NULL and a live frame timer, which crashes
+ * the LVGL task on the next tick. A fresh object carries a fresh paused
+ * timer, so a failed init just leaves the sprite absent instead. */
+static void recreate_gif(const void *dsc)
+{
+    lv_obj_t *parent = lv_obj_get_parent(gif);
+    lv_obj_delete(gif);
+    gif = lv_gif_create(parent);
+    lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
+    lv_gif_set_src(gif, dsc);
+    apply_sprite_mode();
+}
+
 static void back_to_idle(lv_timer_t *timer)
 {
     LV_UNUSED(timer);
     idle_timer = NULL;
     if (current_animation != GEMMI_ANIM_IDLE) {
-        lv_gif_set_src(gif, gemmi_anims[GEMMI_ANIM_IDLE].dsc);
+        recreate_gif(gemmi_anims[GEMMI_ANIM_IDLE].dsc);
         current_animation = GEMMI_ANIM_IDLE;
     }
 }
 
-#define SCENE_W 226
-#define SCENE_H 238
-#define GIF_SIZE 196
-
 static int64_t last_swap_us;
 
-/* lv_gif_set_src tears down and rebuilds the ARGB decoder; doing that inside
- * an input-event handler can hit the decoder while a draw references it.
- * Defer the swap to the LVGL timer loop instead. */
+/* Defer the swap to the LVGL timer loop instead of running it inside an
+ * input-event handler. */
 static void swap_animation(void *dsc)
 {
-    lv_gif_set_src(gif, dsc);
+    recreate_gif(dsc);
 }
 
 static void play_state(const char *state, bool return_to_idle)
@@ -213,12 +246,9 @@ static void show_nav_dock(void)
 
 static void set_sprite_small(void)
 {
-    /* Badge in the corner of the list/detail views, out of the rows' way.
-     * Must re-align, not set_pos: ALIGN_CENTER would turn pos into an
-     * offset from the centre and leave the sprite overlapping the rows. */
-    lv_obj_set_size(gif, 44, 44);
-    lv_image_set_scale(gif, 44 * 256 / 96);
-    lv_obj_align(gif, LV_ALIGN_TOP_LEFT, 4, 4);
+    /* Badge in the corner of the list view, out of the rows' way. */
+    sprite_mode = 1;
+    apply_sprite_mode();
 }
 
 static void enter_agents_list(void)
@@ -259,9 +289,8 @@ static void show_agent_detail(void)
         lv_obj_add_flag(agent_rows[slot], LV_OBJ_FLAG_HIDDEN);
     }
     /* Detail puts the sprite beside the feed, a little bigger than a badge. */
-    lv_obj_set_size(gif, 96, 96);
-    lv_image_set_scale(gif, 256);
-    lv_obj_align(gif, LV_ALIGN_TOP_LEFT, 4, 40);
+    sprite_mode = 2;
+    apply_sprite_mode();
     if (last_musing[0]) {
         lv_label_set_text(musing_label, last_musing);
         lv_obj_remove_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
@@ -295,9 +324,8 @@ static void show_agent_detail(void)
 
 static void set_sprite_home(void)
 {
-    lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
-    lv_image_set_scale(gif, GIF_SIZE * 256 / 96);
-    lv_obj_center(gif);
+    sprite_mode = 0;
+    apply_sprite_mode();
 }
 
 static void show_home(void)
@@ -548,10 +576,10 @@ void gemmi_ui_init(lv_display_t *display)
     gif = lv_gif_create(scene);
     lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
     lv_gif_set_src(gif, gemmi_anims[GEMMI_ANIM_IDLE].dsc);
-    lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
     /* Frames are native 96 px; scale the image up so the sprite fills the
      * object instead of drawing tiny in a big box. */
-    set_sprite_home();
+    sprite_mode = 0;
+    apply_sprite_mode();
 
     lv_obj_t *bubble = bubble_obj = lv_obj_create(screen);
     lv_obj_set_pos(bubble, BUBBLE_X, BUBBLE_Y);

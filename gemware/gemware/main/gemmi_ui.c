@@ -502,7 +502,7 @@ static void refresh_pet_badge(void)
     if (!pet_badge) return;
     char text[64];
     const gemmi_pet_stats_t *stats = gemmi_pet_stats();
-    snprintf(text, sizeof(text), "Lv.%lu / %lu gems", (unsigned long)gemmi_pet_level(), (unsigned long)stats->gems);
+    snprintf(text, sizeof(text), "Lv.%lu · %lu", (unsigned long)gemmi_pet_level(), (unsigned long)stats->gems);
     lv_label_set_text(pet_badge, text);
 
 }
@@ -765,7 +765,7 @@ static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t w
     lv_obj_set_style_bg_color(button, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_color(button, lv_color_hex(0x888888), 0);
     lv_obj_set_style_border_width(button, 1, 0);
-    lv_obj_set_style_pad_all(button, 3, 0);
+    lv_obj_set_style_pad_all(button, 1, 0);
     lv_obj_set_style_radius(button, 0, 0);
     lv_obj_set_style_shadow_width(button, 0, 0);
     /* Match the console frame with square grey outlines. */
@@ -781,7 +781,7 @@ static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t w
     lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(label, lv_color_hex(0x777777), 0);
     lv_obj_set_style_text_font(label, UI_MONO, 0);
-    make_label_upright(label, width - 10, 14);
+    make_label_upright(label, width - 4, 14);
     lv_obj_center(label);
     return label;
 }
@@ -1222,14 +1222,13 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_text_font(status_label, UI_MONO, 0);
     lv_label_set_long_mode(status_label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_color(status_label, lv_color_hex(0xA799B2), 0);
-    /* Small round status marker to the left of the caption. */
-    lv_obj_t *badge_icon = lv_obj_create(screen);
+    /* Small diamond status marker to the left of the caption. */
+    static const lv_point_precise_t status_diamond[] = {{4,0},{8,4},{4,8},{0,4},{4,0}};
+    lv_obj_t *badge_icon = lv_line_create(screen);
+    lv_line_set_points(badge_icon, status_diamond, 5);
     lv_obj_set_pos(badge_icon, 9, 9);
-    lv_obj_set_size(badge_icon, 8, 8);
-    lv_obj_set_style_radius(badge_icon, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(badge_icon, lv_color_hex(0xA799B2), 0);
-    lv_obj_set_style_border_width(badge_icon, 0, 0);
-    lv_obj_set_style_shadow_width(badge_icon, 0, 0);
+    lv_obj_set_style_line_width(badge_icon, 2, 0);
+    lv_obj_set_style_line_color(badge_icon, lv_color_hex(0xA799B2), 0);
     make_label_upright(status_label, 90, 12);
     lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_LEFT, 0);
 

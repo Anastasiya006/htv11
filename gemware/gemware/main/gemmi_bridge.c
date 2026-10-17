@@ -211,9 +211,19 @@ static void gemmi_bridge_task(void *arg)
             /* A dropped answer leaves the agent waiting forever, so retry a
              * few times before giving up. The slot we just consumed keeps
              * room in the queue for the requeue. */
-            if (sent != ESP_OK && ++outgoing.attempts < 4 &&
+            if (sent != ESP_OK && ++outgoing.attempts < 6 &&
                 xQueueSendToBack(device_msg_queue, &outgoing, 0) == pdTRUE) {
                 ESP_LOGI(TAG, "queued retry %d for event %d", outgoing.attempts, outgoing.event_id);
+                continue;
+            }
+            /* A response that never landed means the ask is still unconsumed
+             * on the bridge; rewind past it so it resurfaces for a retry
+             * instead of vanishing while showing "sent". */
+            if (sent != ESP_OK && outgoing.choice[0] != '\0' &&
+                outgoing.event_id <= last_shown_id) {
+                ESP_LOGW(TAG, "answer for %d never reached the bridge; "
+                         "resurfacing the ask", outgoing.event_id);
+                last_shown_id = outgoing.event_id - 1;
             }
             continue;
         }

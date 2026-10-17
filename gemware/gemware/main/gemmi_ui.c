@@ -589,12 +589,12 @@ static void enter_ask(void)
     ask_foreground = true;
     if (pending_ask.choice_count == 3) lv_obj_remove_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_height(scene_obj, 124);
+    lv_obj_set_height(scene_obj, SCENE_H);
     lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
     show_log(false);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
     for (int row = 0; row < AGENT_ROWS; row++) lv_obj_add_flag(agent_rows[row], LV_OBJ_FLAG_HIDDEN);
-    sprite_mode = 3;
+    sprite_mode = 0;
     apply_sprite_mode();
     lv_point_t question_size;
     lv_text_get_size(&question_size, pending_ask.message, UI_BODY, 0, 4,

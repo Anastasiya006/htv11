@@ -386,18 +386,18 @@ void gemmi_ui_show_image(uint8_t *data, size_t len)
         jpeg_view = lv_image_create(scene_obj);
         lv_obj_align(jpeg_view, LV_ALIGN_CENTER, 0, 0);
     }
-    jpeg_buf = data;
+    /* `data` is the static bridge buffer — never freed; a new frame just
+     * overwrites it. jpeg_buf marks "an image is loaded" for `view`. */
     if (len < 4) return;
     unsigned w = data[0] | (data[1] << 8);
     unsigned h = data[2] | (data[3] << 8);
     /* A legacy JPEG payload (FF D8 magic) or a bogus header must never reach
      * lv_image — a giant frame buffer overflows straight into heap lists. */
-    if (w == 0 || w > 160 || h == 0 || h > 120 || (size_t)w * h * 2 + 4 > len) {
+    if (w == 0 || w > 96 || h == 0 || h > 72 || (size_t)w * h * 2 + 4 > len) {
         ESP_LOGW(TAG, "bad image header w=%u h=%u len=%u", w, h, (unsigned)len);
-        free(jpeg_buf);
-        jpeg_buf = NULL;
         return;
     }
+    jpeg_buf = data;
     jpeg_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
     jpeg_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
     jpeg_dsc.header.w = w;
@@ -414,13 +414,6 @@ void gemmi_ui_show_image(uint8_t *data, size_t len)
 static void hide_jpeg(void)
 {
     if (jpeg_view) lv_obj_add_flag(jpeg_view, LV_OBJ_FLAG_HIDDEN);
-    if (jpeg_buf) {
-        /* The decoded frame may live in LVGL's image cache — drop that
-         * reference before freeing, or the next alloc walks a torn list. */
-        lv_image_cache_drop(&jpeg_dsc);
-        free(jpeg_buf);
-        jpeg_buf = NULL;
-    }
 }
 
 static void show_nav_dock(void)

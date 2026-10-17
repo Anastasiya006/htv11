@@ -34,8 +34,23 @@ typedef struct {
 static QueueHandle_t device_msg_queue;
 static int last_shown_id;
 
+typedef struct { uint8_t *buf; size_t len; } gemmi_image_t;
+
+/* Static image buffer — a malloc here can fail under heap fragmentation and
+ * silently starve the fetch. Persistent storage also survives for `view`. */
+static uint8_t image_raw[14000];
+static gemmi_image_t img = {.buf = image_raw};
+static bool collecting_image;
+
 static esp_err_t collect_response(esp_http_client_event_t *event)
 {
+    if (event->event_id == HTTP_EVENT_ON_DATA && collecting_image) {
+        size_t avail = sizeof(image_raw) - img.len;
+        size_t copy = event->data_len < avail ? event->data_len : avail;
+        memcpy(image_raw + img.len, event->data, copy);
+        img.len += copy;
+        return ESP_OK;
+    }
     gemmi_http_response_t *response = event->user_data;
     if (response == NULL || event->event_id != HTTP_EVENT_ON_DATA ||
         response->length >= sizeof(response->body) - 1) {
@@ -60,7 +75,9 @@ static esp_err_t reset_client(void)
     esp_http_client_config_t config = {
         .url = CONFIG_GEMMI_BRIDGE_URL,
         .timeout_ms = 3000,
-        .keep_alive_enable = true,
+        /* A restarted bridge leaves a half-open keep-alive socket that makes
+         * perform hang instead of erroring — always take a fresh socket. */
+        .keep_alive_enable = false,
         .event_handler = collect_response,
 #if CONFIG_GEMMI_BRIDGE_REQUIRE_TLS
         .crt_bundle_attach = esp_crt_bundle_attach,
@@ -125,52 +142,30 @@ static esp_err_t bridge_post(const char *path, int event_id, const char *choice)
     return ESP_OK;
 }
 
-typedef struct { uint8_t *buf; size_t len; } gemmi_image_t;
-
-static esp_err_t collect_image(esp_http_client_event_t *event)
-{
-    gemmi_image_t *img = event->user_data;
-    if (img == NULL || event->event_id != HTTP_EVENT_ON_DATA) return ESP_OK;
-    if (img->buf == NULL) {
-        img->buf = malloc(40960);
-        if (img->buf == NULL) return ESP_FAIL;
-    }
-    size_t avail = 40960 - img->len;
-    size_t copy = event->data_len < avail ? event->data_len : avail;
-    memcpy(img->buf + img->len, event->data, copy);
-    img->len += copy;
-    return ESP_OK;
-}
-
-/* Fetch a stored RGB565 artifact on a dedicated client — the shared client's
- * handler is collect_response, which would walk img as a text response and
- * write wild. Caller owns the returned buffer. */
+/* Fetch a stored RGB565 artifact on the shared client (a second TLS socket
+ * through the funnel fails to connect). The collecting_image flag makes
+ * collect_response divert binary data into the static buffer — callers must
+ * not free it. */
 static gemmi_image_t fetch_image(int event_id)
 {
-    gemmi_image_t img = {0};
+    img.len = 0;
+    if (client == NULL && reset_client() != ESP_OK) return img;
     char url[192];
     snprintf(url, sizeof(url), "%s/v1/events/%d/image", CONFIG_GEMMI_BRIDGE_URL, event_id);
-    esp_http_client_config_t config = {
-        .url = url,
-        .timeout_ms = 5000,
-        .event_handler = collect_image,
-        .user_data = &img,
-#if CONFIG_GEMMI_BRIDGE_REQUIRE_TLS
-        .crt_bundle_attach = esp_crt_bundle_attach,
-#endif
-    };
-    esp_http_client_handle_t image_client = esp_http_client_init(&config);
-    if (image_client == NULL) return img;
-    if (strlen(CONFIG_GEMMI_BRIDGE_TOKEN) > 0) {
-        char authorization[128];
-        snprintf(authorization, sizeof(authorization), "Bearer %s", CONFIG_GEMMI_BRIDGE_TOKEN);
-        esp_http_client_set_header(image_client, "Authorization", authorization);
-    }
-    esp_err_t error = esp_http_client_perform(image_client);
-    int status = esp_http_client_get_status_code(image_client);
-    esp_http_client_cleanup(image_client);
+    esp_http_client_set_url(client, url);
+    esp_http_client_set_method(client, HTTP_METHOD_GET);
+    esp_http_client_set_header(client, "Accept", "application/octet-stream");
+    esp_http_client_set_post_field(client, NULL, 0);
+    collecting_image = true;
+    esp_err_t error = esp_http_client_perform(client);
+    collecting_image = false;
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_set_header(client, "Accept", "text/plain");
+    ESP_LOGI(TAG, "image %d: err=%s status=%d len=%u head=%02x%02x%02x%02x",
+             event_id, esp_err_to_name(error), status, (unsigned)img.len,
+             img.len > 0 ? img.buf[0] : 0, img.len > 1 ? img.buf[1] : 0,
+             img.len > 2 ? img.buf[2] : 0, img.len > 3 ? img.buf[3] : 0);
     if (error != ESP_OK || status != 200 || img.len == 0) {
-        free(img.buf);
         return (gemmi_image_t){0};
     }
     return img;
@@ -323,7 +318,7 @@ static void gemmi_bridge_task(void *arg)
         gemmi_display_unlock();
         if (strcmp(event.kind, "artifact") == 0) {
             gemmi_image_t img = fetch_image(event.id);
-            if (img.buf != NULL) {
+            if (img.len > 0) {
                 gemmi_display_lock();
                 gemmi_ui_show_image(img.buf, img.len);
                 gemmi_display_unlock();

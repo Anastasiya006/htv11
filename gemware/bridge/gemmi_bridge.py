@@ -465,7 +465,7 @@ def submit(args: argparse.Namespace, kind: str) -> int:
         except ImportError:
             raise SystemExit("gemmi artifact --file needs Pillow (pip install pillow)")
         im = Image.open(image_path).convert("RGB")
-        im.thumbnail((160, 120))
+        im.thumbnail((96, 72))
         w, h = im.size
         pixels = bytearray()
         raw = im.tobytes()

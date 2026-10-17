@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {WebSocketServer}=require('ws');
 const pty=require('node-pty');
+const telemetry=require('./telemetry.cjs');
 const screenshots=require('./screenshots.cjs');
 const {randomUUID}=require('node:crypto');
 // npm may unpack the macOS prebuilt helper without its executable bit.
@@ -11,6 +12,7 @@ if(process.platform==='darwin'){
  if(fs.existsSync(helper))fs.chmodSync(helper,0o755);
 }
 const root=path.resolve(__dirname,'..');
+const port=Number(process.env.GEMMI_PORT)||3210;
 const runtime=path.join(__dirname,'.runtime');
 function state(){
  const now=Date.now();
@@ -19,7 +21,7 @@ function state(){
   if(!name.endsWith('.json')||name.endsWith('.response.json'))continue;
   try{const s=JSON.parse(fs.readFileSync(path.join(runtime,name),'utf8'));if(now-s.at<3600000&&s.event!=='SessionEnd'&&(!managedCLI||s.session===terminalSession))sessions.push(s);}catch{}
  }
- const priority={'needs-attention':4,working:3,reading:3,thinking:3,success:2,idle:1};
+ const priority={'needs-attention':4,error:4,working:3,reading:3,thinking:3,success:2,idle:1};
  sessions.sort((a,b)=>(priority[b.animation]||0)-(priority[a.animation]||0)||b.at-a.at);
  const active=sessions[0];
  const connected=managedCLI?Boolean(terminal):sessions.length>0;
@@ -27,10 +29,11 @@ function state(){
  for(const session of active?[active]:[]){
   try{const candidate=JSON.parse(fs.readFileSync(path.join(runtime,session.session+'.response.json'),'utf8'));if(candidate.at>=(session.turnAt||0)&&(!response||candidate.at>response.at))response=candidate;}catch{}
  }
- return {screenshots:connected?screenshots.list(active?.turnAt||Date.now()):[],animation:!connected?'disconnected':active?(active.animation==='success'&&now-active.at>5000?'idle':active.animation):'idle',connected,turnAt:active?.turnAt||0, message:active?.message||'', eventId:active?`${active.session}:${active.at}`:null, at:active?.at||0,response:response?.text||'',responseAt:response?.at||0};
+ return {protocol:2,session:active?.session||terminalSession||null,telemetry:telemetry.read(runtime,active?.session,active?.turnAt||0),serverAt:now,screenshots:connected?screenshots.list(active?.turnAt||Date.now(),response?.text||''):[],animation:!connected?'disconnected':active?(active.animation==='success'&&now-active.at>5000?'idle':active.animation):'idle',connected,turnAt:active?.turnAt||0, message:active?.message||'', eventId:active?`${active.session}:${active.at}`:null, at:active?.at||0,response:response?.text||'',responseAt:response?.at||0};
 }
-const types={'.html':'text/html','.css':'text/css','.js':'text/javascript','.gif':'image/gif'};
+const types={'.html':'text/html','.css':'text/css','.js':'text/javascript','.gif':'image/gif','.svg':'image/svg+xml'};
 const server=http.createServer((req,res)=>{
+ if(req.headers.host!==`127.0.0.1:${port}`){res.writeHead(403);res.end();return;}
  res.setHeader('Cache-Control','no-store');
  const url=new URL(req.url,'http://127.0.0.1');
  if(req.method!=='GET'){res.writeHead(405);res.end();return;}
@@ -45,17 +48,17 @@ const server=http.createServer((req,res)=>{
  const vendors={'/vendor/xterm.js':'@xterm/xterm/lib/xterm.js','/vendor/xterm.css':'@xterm/xterm/css/xterm.css','/vendor/fit.js':'@xterm/addon-fit/lib/addon-fit.js'};
  if(vendors[url.pathname]){const f=path.join(__dirname,'node_modules',vendors[url.pathname]);res.setHeader('Content-Type',url.pathname.endsWith('.css')?'text/css':'text/javascript');fs.createReadStream(f).on('error',()=>res.end()).pipe(res);return;}
  const file=url.pathname==='/'?'simulator/index.html':url.pathname.slice(1);
- if(!['simulator/index.html','simulator/style.css','simulator/app.js','simulator/terminal.js','simulator/picker.js'].includes(file)&&!/^animations\/[a-z-]+\.gif$/.test(file)){res.writeHead(404);res.end();return;}
+ if(!['simulator/index.html','simulator/style.css','simulator/app.js','simulator/terminal.js','simulator/picker.js','simulator/mission.js','simulator/demo.js','simulator/demo-preview.svg'].includes(file)&&!/^animations\/[a-z-]+\.gif$/.test(file)){res.writeHead(404);res.end();return;}
  fs.readFile(path.join(root,file),(err,data)=>{if(err){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',types[path.extname(file)]||'application/octet-stream');res.end(data);});
 });
 server.on('error',err=>{console.error(err.message);process.exitCode=1;});
-server.listen(3210,'127.0.0.1',()=>console.log('Gemmi: http://127.0.0.1:3210'));
+server.listen(port,'127.0.0.1',()=>console.log(`Gemmi: http://127.0.0.1:${port}`));
 
 const sockets=new WebSocketServer({noServer:true,maxPayload:65536});
-let terminal=null, output='',client=null,managedCLI=false,terminalSession=null;
+let terminal=null, output='',client=null,managedCLI=true,terminalSession=null;
 server.on('upgrade',(req,socket,head)=>{
  // A remote page must not be able to drive a local command terminal.
- if(req.url!=='/terminal'||req.headers.host!=='127.0.0.1:3210'||req.headers.origin!=='http://127.0.0.1:3210'){socket.destroy();return;}
+ if(req.url!=='/terminal'||req.headers.host!==`127.0.0.1:${port}`||req.headers.origin!==`http://127.0.0.1:${port}`){socket.destroy();return;}
  sockets.handleUpgrade(req,socket,head,ws=>sockets.emit('connection',ws));
 });
 sockets.on('connection',ws=>{

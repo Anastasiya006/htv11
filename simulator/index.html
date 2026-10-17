@@ -8,10 +8,13 @@
 <link rel="stylesheet" href="/simulator/style.css">
 </head>
 <body>
-<div class="workspace"><main id="screen" aria-label="Gemmi · 240 by 320 display"></main><section class="cli" aria-label="Gemini CLI"><header><span>Gemini CLI</span><button id="connect">Start CLI</button></header><div id="terminal"></div></section></div>
+<div class="workspace"><div class="device-column"><div class="device-caption">GEMMI <span>AGENT COMPANION / 01</span></div><div id="device-viewport"><main id="screen" aria-label="Gemmi · 240 by 320 display"></main></div><div class="device-controls"><label>240 × 320 <select id="device-zoom" aria-label="Display zoom"><option value="1">1×</option><option value="2" selected>2×</option></select></label><button id="replay-demo">◇ Replay demo</button></div></div><section class="cli" aria-label="Gemini CLI"><header><span>Gemini CLI</span><button id="connect">Start CLI</button></header><div id="demo-banner" hidden>DEMO REPLAY · Synthetic events. No commands execute.</div><div id="terminal"></div></section></div>
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/fit.js"></script>
 <script src="/simulator/app.js"></script>
+<script src="/simulator/picker.js"></script>
 <script src="/simulator/terminal.js"></script>
+<script src="/simulator/mission.js"></script>
+<script src="/simulator/demo.js"></script>
 </body>
 </html>

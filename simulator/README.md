@@ -1,32 +1,75 @@
-# Gemmi + Gemini CLI
+# Gemmi / Agent companion
 
-Install once with `cd simulator && npm install`. From the project root, run:
+A 240 × 320 pet interface to Gemini CLI, with a basic browser terminal and an inspector built into the device screen. The screen stays white, the surrounding workspace stays black, and technical detail lives behind a tap on Gemmi’s top status strip. The CLI stays a plain terminal.
+
+## Run
 
 ```sh
-node simulator/server.cjs
+cd simulator
+npm install
+npm start
 ```
 
-Open http://127.0.0.1:3210, then click **Start CLI** beside Gemmi. Gemini runs in the browser terminal, in this project. Type, use arrow keys, and answer permission prompts there. Opening index.html directly no longer provides a live connection.
+Open **http://127.0.0.1:3210**. Click **Start CLI**, sign in if needed, and send a prompt. Gemini runs in the project root with its normal approval policy. Use `127.0.0.1`, not `localhost` (the server checks the HTTP host and WebSocket origin).
 
-The project `.gemini/settings.json` registers Gemini CLI lifecycle hooks. If Gemini asks you to trust the project/hooks, review and accept them in the CLI to enable the connection.
+A restart of the bridge stops its embedded Gemini process. Reloading the page preserves the process and replays its terminal buffer. Only one tab can control it at once. `GEMMI_PORT=3211 node simulator/server.cjs` runs an isolated bridge on a different port.
 
-Gemmi thinks during a turn, works during tools, celebrates a completed response, and needs attention on CLI notifications. Tap for a love reaction. No extra screen controls. Permissions remain in Gemini CLI; this integration only observes events.
+## Explore without a model
 
-Hooks write only session ID, event name, animation, and receipt time into ignored `simulator/.runtime/` files. Prompts, responses, command text, and credentials are not stored. The loopback server serves only simulator assets and aggregate animation state. Multiple sessions prioritize attention, then work. No hook event for an hour is treated as stale; an abruptly killed CLI can therefore leave a stale working animation until that timeout. This is an initial activity connection, not a durable agent transport.
+Click **Replay demo** below Gemmi. A clearly labeled, synthetic 15-second sequence demonstrates planning, reading a file, a failed command, editing, verification, a response, and a sample image. The replay does not start a CLI or send terminal input. Existing CLI processes can continue in the background. Click **Exit demo** to return to live state.
 
-Stop the server with Ctrl+C. Remove the `gemmi-display` hook entries to disconnect the CLI. The terminal uses xterm.js, node-pty, and ws. Refreshing preserves the running CLI while the bridge stays up; only one tab can control it at a time. Stopping the bridge also stops its CLI. Use `127.0.0.1`, not `localhost`, for the terminal origin check.
+## The companion
 
-The bottom of Gemmi’s screen mirrors the latest three nonempty lines from the embedded terminal’s parsed output. Terminal formatting and cursor redraws are handled by xterm. Long lines wrap and the text area scrolls to the newest text. Actual terminal content (including command text and any input the CLI echoes) can appear here. Before connecting the embedded terminal, the display falls back to hook activity labels.
+- Reading tools → reading animation; edits and commands → working; between tools → thinking.
+- Tool errors → error reaction; completed turns → celebration; permission notifications → needs attention.
+- Idle Gemmi blinks and looks around, then sleeps after a minute. Tap to wake or show affection.
+- The pixel console shows activity plus a two-line response preview. **MORE** opens a scrollable answer while keeping a small animated Gemmi visible.
+- A new prompt clears the previous response and image cards. Disconnects clear content and show the disconnected animation.
+- Tap the device’s top status strip to open connection diagnostics.
 
+## On-device inspector
 
-The device text now shows only completed assistant responses from Gemini's `AfterAgent.prompt_response` hook. It does not mirror terminal prompts, input, menus, or status bars. Responses appear when a turn finishes, not while streaming. They are stored locally in ignored `.runtime/*.response.json` files (up to 32 KB per session); delete that folder to clear them. Restart the bridge after this update, and restart the Gemini session to pick up hook configuration changes if necessary.
+Tap Gemmi’s top status strip to open a compact inspector on the 240 × 320 display. A small reading Gemmi stays above the console. Tabs switch between:
 
-Device text includes thinking/tool activity and completed responses as a small scrollable log. Activity labels come from lifecycle hooks; these are status descriptions, not the model’s private reasoning. Terminal menus and echoed user input remain excluded.
+- **TOOLS**: current tool and duration, completed calls, tool/error counts, and turn elapsed time.
+- **EVENTS**: a timestamped execution timeline, newest first.
+- **LINK**: CLI state, round-trip latency, hook age, session ID, protocol, and JSON event export.
 
-Completed answers now remain as a two-line preview below Gemmi. Click the preview to read the entire answer within the 240 × 320 screen; scroll to read and use Back or Escape to return. Live activity has its own line and cannot overwrite the answer.
+All durations use hook receipt times, including hook overhead. Calls are paired by tool name and an argument hash in FIFO order. This is an observation journal, not a canonical execution trace with CLI-native call IDs. Token counts, costs, and test pass counts are not invented.
 
-Gemmi can mirror numbered radio menus that have a visible selection marker in the embedded terminal. Tap an option and then CONFIRM; the terminal receives arrow keys and Enter. The menu is rechecked before submission. BACK leaves the prompt available in the terminal. Unrecognized prompts and free text must be answered in the terminal. This uses terminal menu detection, not a structured Gemini approval API; a real permission prompt still needs end-to-end verification.
+The internal display stays exactly 240 × 320. Desktop defaults to 2× magnification; select 1× for actual CSS size. Small screens default to 1×. **Escape** closes response, image, and inspector readers.
 
-## Screenshot cards
+## Picking answers
 
-Ask Gemini to save a screenshot in `screenshots/` at the project root. Images written during the current turn appear under Gemmi as **View image**. Tap to fit the image to the screen; use ZOOM + to view at original size and scroll to pan. Arrows step through up to eight images. New turns and disconnection clear the cards. PNG/JPEG/WebP up to 10 MB are supported. See `../screenshots/README.md`.
+Numbered radio menus with a visible selection marker can be mirrored onto Gemmi. Tap an option and then **CONFIRM**; arrow keys and Enter are sent to the terminal. Context and options are rechecked before submission. **BACK** keeps the prompt in the terminal. Unrecognized prompts and free-text input stay in the terminal.
+
+This is terminal menu detection, not a structured approval API. Ordinary numbered response lists without a selection marker are excluded. Gemini’s native approvals remain authoritative.
+
+## Screenshots
+
+Ask Gemini to save PNG/JPEG/WebP files into the project’s `screenshots/` folder. Images written during the current turn appear as **View image** cards. Markdown image links in completed responses also discover images in project subfolders; these are imported into the ignored screenshots folder. The viewer supports fit, original-size zoom/pan, and navigation through up to eight images. Each image is limited to 10 MB. Symlinks and arbitrary file paths are rejected. Gemini needs an actual browser capture tool to take screenshots; this bridge displays files, not captures pages.
+
+The replay uses the labeled sample `demo-preview.svg`; live screenshot serving accepts raster images only.
+
+## Local data and privacy
+
+The project `.gemini/settings.json` registers lifecycle hooks. Review/trust the project in Gemini if prompted.
+
+Ignored `simulator/.runtime/` contains:
+
+- Session state and completed assistant response text (up to 32 KB per session).
+- A versioned journal bounded to 512 events per session. It records event/tool names, target basenames or command executable names, timestamps, error flags, and argument hashes for pairing. It does **not** store raw prompts, raw command arguments, tool output, or environment values in the journal. Environment assignments used as executable prefixes are redacted.
+
+Responses can contain whatever Gemini wrote, including sensitive content; runtime files and screenshots are ignored by Git. The terminal replay buffer is kept in server memory, capped at 256 KB. The server binds to loopback and checks Host/Origin. Stop the bridge before deleting `.runtime/` to clear saved data.
+
+## Validation
+
+```sh
+npm run check
+npm test
+npx playwright install chromium  # once, for browser checks
+# start a separate server with GEMMI_PORT=3211, then:
+npm run test:ui
+```
+
+Node tests cover event pairing, durations, failures, metadata minimization, and retention. Browser tests cover logical device dimensions, mobile layout, on-device inspector tabs, menu forwarding, the demo, response clearing, image viewing/zoom, and safe text rendering.

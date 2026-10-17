@@ -5,7 +5,9 @@
   "main": "server.cjs",
   "scripts": {
     "start": "node server.cjs",
-    "check": "node --check server.cjs && node --check app.js && node --check terminal.js && node --check gemini-hook.cjs"
+    "check": "node --check server.cjs && node --check app.js && node --check terminal.js && node --check gemini-hook.cjs && node --check telemetry.cjs && node --check mission.js && node --check demo.js",
+    "test": "node --test tests/*.test.cjs",
+    "test:ui": "playwright test"
   },
   "keywords": [],
   "author": "",
@@ -17,5 +19,8 @@
     "node-pty": "^1.1.0",
     "ws": "^8.22.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.64.1"
+  }
 }

@@ -12,6 +12,6 @@ function readGemmiMenu(lines){
   options.push(m[3].trim());last=i;
  }
  if(options.length<2||selected<0)return null;
- return {options,selected,context:lines.slice(Math.max(0,first-7),first).map(l=>l.replace(/[\u2500-\u257f]/g,'').trim()).filter(Boolean).join('\n'),signature:lines.slice(first,last+1).join('\n')};
+ return {options,selected,context:lines.slice(Math.max(0,first-7),first).map(l=>l.replace(/[\u2500-\u257f]/g,'').trim()).filter(Boolean).join('\n'),signature:lines.slice(Math.max(0,first-7),last+1).join('\n')};
 }
 if(typeof module!=='undefined')module.exports={readGemmiMenu};

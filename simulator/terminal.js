@@ -1,30 +1,16 @@
 'use strict';
-// Detect numbered radio menus in the parsed, visible terminal screen only.
-function readGemmiMenu(lines){
- const options=[];let selected=-1,first=-1,last=-1;
- for(let i=0;i<lines.length;i++){
-  const m=lines[i].match(/^\s*[│┃]?\s*([❯›>●◉○ ]?)\s*(\d+)[.)]\s+(.+?)(?:\s*[│┃])?\s*$/u);
-  if(!m)continue;
-  if(options.length&&Number(m[2])!==options.length+1){options.length=0;selected=-1;first=-1;}
-  if(!options.length&&Number(m[2])!==1)continue;
-  if(first<0)first=i;
-  if(/[❯›>●◉]/u.test(m[1]))selected=options.length;
-  options.push(m[3].trim());last=i;
- }
- if(options.length<2||selected<0)return null;
- return {options,selected,context:lines.slice(Math.max(0,first-7),first).map(l=>l.replace(/[\u2500-\u257f]/g,'').trim()).filter(Boolean).join('\n'),signature:lines.slice(first,last+1).join('\n')};
-}
-
-'use strict';
 const terminal=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Menlo, monospace',theme:{background:'#000000',foreground:'#d4cddd'},scrollback:3000});
 const fit=new FitAddon.FitAddon();terminal.loadAddon(fit);terminal.open(document.getElementById('terminal'));fit.fit();
 terminal.writeln('Start CLI to open Gemini here.');
 const connect=document.getElementById('connect');let socket;
-function send(message){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(message));}
+function send(message){if(!document.getElementById('demo-banner').hidden)return;if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(message));}
 terminal.onData(data=>send({type:'input',data}));
-const resize=()=>{fit.fit();send({type:'resize',cols:terminal.cols,rows:terminal.rows});};
+const resize=()=>{if(document.getElementById('terminal').hidden)return;fit.fit();send({type:'resize',cols:terminal.cols,rows:terminal.rows});};
 new ResizeObserver(resize).observe(document.getElementById('terminal'));
+window.addEventListener('resize',()=>requestAnimationFrame(resize));
+document.fonts.ready.then(resize);
 connect.onclick=()=>{
+ if(document.getElementById('demo-banner')&&!document.getElementById('demo-banner').hidden)return;
  if(socket&&socket.readyState<2)return;
  terminal.reset();connect.disabled=true;connect.textContent='Connecting…';
  socket=new WebSocket(`ws://${location.host}/terminal`);
@@ -44,7 +30,7 @@ function currentMenu(){
  return readGemmiMenu(lines);
 }
 function drawMenu(){
- const next=socket?.readyState===WebSocket.OPEN?currentMenu():null;
+ const next=socket?.readyState===WebSocket.OPEN&&document.getElementById('demo-banner').hidden?currentMenu():null;
  if(!next){menu=null;chosen=null;picker.hidden=true;dismissed=null;return;}
  if(menu?.signature===next.signature)return;
  menu=next;chosen=null;
@@ -69,3 +55,21 @@ document.getElementById('picker-confirm').onclick=()=>{
  dismissed=menu.signature;picker.hidden=true;chosen=null;
 };
 window.addEventListener('gemmi-connection',event=>{if(!event.detail.connected){picker.hidden=true;menu=null;chosen=null;}});
+
+window.addEventListener('gemmi-demo',event=>{picker.hidden=true;menu=null;chosen=null;if(!event.detail)setTimeout(drawMenu,0);});
+
+// Mirror only live spinner/status lines, not input, menus or terminal chrome.
+let lastProgress=null;
+terminal.onWriteParsed(()=>{
+ let progress=null;
+ if(socket?.readyState===WebSocket.OPEN&&document.getElementById('demo-banner').hidden){
+  const buffer=terminal.buffer.active;
+  for(let row=buffer.baseY+terminal.rows-1;row>=buffer.baseY;row--){
+   const line=buffer.getLine(row)?.translateToString(true)||'';
+   const match=line.match(/^\s*[│┃]?\s*([\u2801-\u28ff◐◓◑◒✢✳✶✻✽])\s+(.+?)\s*[│┃]?\s*$/u);
+   if(match){progress=match[1]+' '+match[2];break;}
+  }
+ }
+ if(progress!==lastProgress){lastProgress=progress;window.dispatchEvent(new CustomEvent('gemmi-progress',{detail:progress}));}
+});
+window.addEventListener('gemmi-connection',event=>{if(!event.detail.connected){lastProgress=null;window.dispatchEvent(new CustomEvent('gemmi-progress',{detail:null}));}});

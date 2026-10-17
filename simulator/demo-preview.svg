@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">
+<rect width="800" height="500" fill="#0c0a10"/>
+<g font-family="monospace" fill="#cfc0dc"><text x="36" y="46" font-size="15" letter-spacing="3">GEMMI / BUILD REPORT</text><text x="615" y="46" font-size="10" fill="#897096">DEMO ARTIFACT</text>
+<path d="M36 65H764" stroke="#392d42"/>
+<text x="36" y="116" font-size="30">A small companion.</text><text x="36" y="154" font-size="30" fill="#aa83cc">A clear signal.</text>
+<rect x="36" y="193" width="345" height="226" rx="5" fill="#14101b" stroke="#3b2c48"/>
+<text x="56" y="225" font-size="12" fill="#a98cbe">VERIFICATION</text><text x="56" y="267" font-size="16" fill="#91be9d">PASS  layout bounds</text><text x="56" y="302" font-size="16" fill="#91be9d">PASS  response reader</text><text x="56" y="337" font-size="16" fill="#91be9d">PASS  image routing</text><text x="56" y="387" font-size="11" fill="#84708f">Sample output · not real test results</text>
+<rect x="407" y="193" width="357" height="226" rx="5" fill="#14101b" stroke="#3b2c48"/>
+<path d="M580 225h24v24h24v24h24v24h-24v24h-24v24h-24v-24h-24v-24h-24v-24h24v-24h24z" fill="#9568dd"/>
+<rect x="570" y="274" width="8" height="8" fill="#241935"/><rect x="606" y="274" width="8" height="8" fill="#241935"/>
+<text x="464" y="388" font-size="12" fill="#a98cbe">240 × 320 / AGENT COMPANION</text>
+<text x="36" y="461" font-size="11" fill="#756080">SYNTHETIC SCREENSHOT · REPLAY MODE · NO COMMANDS EXECUTED</text></g></svg>

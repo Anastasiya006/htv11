@@ -78,6 +78,10 @@ static void trim_for_bubble(const char *source, char *destination, size_t destin
 
     size_t copy_length = MAX_BUBBLE_TEXT - 3;
     if (copy_length >= destination_size) copy_length = destination_size - 1;
+    /* Do not cut inside a UTF-8 continuation byte or the panel shows glyphs. */
+    while (copy_length > 0 && (source[copy_length] & 0xC0) == 0x80) {
+        copy_length--;
+    }
     memcpy(destination, source, copy_length);
     strlcpy(destination + copy_length, "...", destination_size - copy_length);
 }
@@ -318,7 +322,10 @@ static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t w
     lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_radius(button, 0, 0);
     lv_obj_set_style_shadow_width(button, 0, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x111111), LV_STATE_PRESSED);
+    /* While held the button is grey so the caption stays readable; a selected
+     * (checked) choice is solid black. Label colour for checked is driven in
+     * select_choice because state styles never reach child labels. */
+    lv_obj_set_style_bg_color(button, lv_color_hex(0xBBBBBB), LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x111111), LV_STATE_CHECKED);
     /* Resistive touch often loses the release position, and CLICKED needs a
      * clean press+release inside the widget. PRESSED fires on touch-down. */
@@ -327,8 +334,6 @@ static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t w
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(label, lv_color_hex(0x111111), 0);
-    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_STATE_PRESSED);
-    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_STATE_CHECKED);
     make_label_upright(label, width - 6, height - 6);
     lv_obj_center(label);
     return label;

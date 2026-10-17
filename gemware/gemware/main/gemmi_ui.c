@@ -42,6 +42,7 @@ typedef struct {
 } gemmi_agent_state_t;
 
 static lv_obj_t *gif;
+static lv_obj_t *bubble_obj;
 static lv_timer_t *idle_timer;
 static lv_obj_t *headline_label;
 static lv_obj_t *message_label;
@@ -108,7 +109,7 @@ static void back_to_idle(lv_timer_t *timer)
 
 #define SCENE_W 226
 #define SCENE_H 238
-#define GIF_SIZE 176
+#define GIF_SIZE 196
 
 static int64_t last_swap_us;
 
@@ -192,13 +193,12 @@ static void show_home(void)
 {
     ask_foreground = false;
     if (ask_pending) {
-        char status[80];
-        snprintf(status, sizeof(status), "%s needs an answer", pending_ask.agent);
-        set_status(status);
-        set_bubble("ask waiting", "asks holds the open question.", "1 ask");
+        set_status("gemmi needs an answer");
+        set_bubble("ask waiting", pending_ask.message, "1 ask");
+        lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
     } else {
-        set_status("gemmi is quiet");
-        set_bubble("quiet queue", "tap when an agent needs you.", "nothing waiting");
+        set_status("gemmi is idle");
+        lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
     }
     show_nav_dock();
     play_state("idle", false);
@@ -208,8 +208,9 @@ static void enter_ask(void)
 {
     ask_foreground = true;
     char status[80];
-    snprintf(status, sizeof(status), "%s asks", pending_ask.agent);
+    snprintf(status, sizeof(status), "answer %s", pending_ask.agent);
     set_status(status);
+    lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
     set_bubble("ask", pending_ask.message, "pick one");
     select_choice(-1);
     for (uint32_t slot = 0; slot < 3; slot++) {
@@ -239,8 +240,9 @@ static void send_choice(int slot)
     ask_pending = false;
     ask_foreground = false;
     char status[80];
-    snprintf(status, sizeof(status), "sent: %s", choice);
+    snprintf(status, sizeof(status), "gemmi sent: %s", choice);
     set_status(status);
+    lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
     set_bubble("answered", pending_ask.message, "done");
     show_nav_dock();
     play_state("success", true);
@@ -265,18 +267,15 @@ static void on_dock(lv_event_t *event)
     switch ((gemmi_action_t)(GEMMI_ACTION_AGENTS + slot)) {
     case GEMMI_ACTION_AGENTS:
         if (agent_feed_count == 0) {
-            set_status("no agents yet");
-            set_bubble("agents", "agent activity lands here as it arrives.", "status view");
+            set_status("gemmi sees no agents");
+            lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
         } else {
             const gemmi_agent_state_t *entry =
                 &agent_feed[(agent_feed_cursor + agent_feed_count - 1) % agent_feed_count];
-            char headline[80];
             char status[80];
-            snprintf(headline, sizeof(headline), "%s · %s", entry->agent, entry->state);
-            snprintf(status, sizeof(status), "agents %d/%d",
-                     agent_feed_count - agent_feed_cursor, agent_feed_count);
+            snprintf(status, sizeof(status), "watching %s · %s", entry->agent, entry->state);
             set_status(status);
-            set_bubble("agents", headline, "status view");
+            lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
             agent_feed_cursor = (agent_feed_cursor + 1) % agent_feed_count;
         }
         play_state("working", true);
@@ -285,22 +284,21 @@ static void on_dock(lv_event_t *event)
         if (ask_pending) {
             enter_ask();
         } else {
-            set_status("gemmi is checking the inbox");
-            set_bubble("asks", "no unanswered decision is waiting right now.", "0 asks");
+            set_status("gemmi checked - no asks");
+            lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
             play_state("thinking", true);
         }
         break;
     case GEMMI_ACTION_VIEW:
         if (have_artifact) {
             char status[80];
-            snprintf(status, sizeof(status), "artifact from %s", last_artifact.agent);
+            snprintf(status, sizeof(status), "gemmi is viewing %.40s",
+                     last_artifact.artifact[0] ? last_artifact.artifact : last_artifact.agent);
             set_status(status);
-            set_bubble("artifact",
-                       last_artifact.artifact[0] ? last_artifact.artifact : last_artifact.message,
-                       "preview");
+            lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
         } else {
-            set_status("gemmi is looking for artifacts");
-            set_bubble("artifact", "screenshots an agent shares will show up here.", "no preview");
+            set_status("gemmi found no artifact");
+            lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
         }
         play_state("reading", true);
         break;
@@ -367,7 +365,7 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
     lv_obj_center(gif);
 
-    lv_obj_t *bubble = lv_obj_create(screen);
+    lv_obj_t *bubble = bubble_obj = lv_obj_create(screen);
     lv_obj_set_pos(bubble, BUBBLE_X, BUBBLE_Y);
     lv_obj_set_size(bubble, BUBBLE_W, BUBBLE_H);
     lv_obj_set_style_bg_color(bubble, lv_color_hex(0xFFFFFF), 0);
@@ -454,12 +452,11 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
     if (strcmp(event->kind, "artifact") == 0) {
         last_artifact = *event;
         have_artifact = true;
-        if (ask_foreground) {
-            snprintf(status, sizeof(status), "%s sent an artifact", event->agent);
-            set_status(status);
-        } else {
-            snprintf(status, sizeof(status), "artifact from %s", event->agent);
-            set_status(status);
+        snprintf(status, sizeof(status), "gemmi is viewing %.40s",
+                 event->artifact[0] ? event->artifact : event->agent);
+        set_status(status);
+        if (!ask_foreground) {
+            lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
             set_bubble("artifact",
                        event->artifact[0] ? event->artifact : event->message, "preview");
         }
@@ -469,11 +466,16 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
 
     /* Status updates change the top line and the character. A foreground ask
      * keeps its question and real choices on screen. */
-    snprintf(status, sizeof(status), "%s is %s", event->agent, event->state);
+    if (strcmp(event->state, "thinking") == 0) {
+        snprintf(status, sizeof(status), "gemmi is thinking");
+    } else {
+        snprintf(status, sizeof(status), "watching %s · %s", event->agent, event->state);
+    }
     set_status(status);
     if (!ask_foreground && !ask_pending) {
         char headline[80];
         snprintf(headline, sizeof(headline), "%s · %s", event->agent, event->state);
+        lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
         set_bubble(headline, event->message, "attention needed");
     }
     play_state(event->state, false);

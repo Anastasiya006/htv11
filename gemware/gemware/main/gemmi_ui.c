@@ -198,7 +198,7 @@ static void show_home(void)
         set_bubble("ask waiting", "asks holds the open question.", "1 ask");
     } else {
         set_status("gemmi is quiet");
-        set_bubble("quiet queue", "i'll tap you when an agent needs a decision.", "nothing waiting");
+        set_bubble("quiet queue", "tap when an agent needs you.", "nothing waiting");
     }
     show_nav_dock();
     play_state("idle", false);

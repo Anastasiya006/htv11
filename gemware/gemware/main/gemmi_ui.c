@@ -103,18 +103,25 @@ static void back_to_idle(lv_timer_t *timer)
 
 static int64_t last_swap_us;
 
+/* lv_gif_set_src tears down and rebuilds the ARGB decoder; doing that inside
+ * an input-event handler can hit the decoder while a draw references it.
+ * Defer the swap to the LVGL timer loop instead. */
+static void swap_animation(void *dsc)
+{
+    lv_gif_set_src(gif, dsc);
+}
+
 static void play_state(const char *state, bool return_to_idle)
 {
     uint32_t index = animation_for_state(state);
-    /* LVGL's ARGB GIF transform path crashes on this ESP32 when an animated
-     * source is reloaded too quickly. Keep GIFs native-size, never reload an
-     * unchanged source, and coalesce bursts to one swap per 300 ms. */
+    /* Keep GIFs native-size, never reload an unchanged source, and coalesce
+     * bursts to one swap per 300 ms. */
     if (index != current_animation) {
         int64_t now = esp_timer_get_time();
         if (now - last_swap_us >= 300000) {
-            lv_gif_set_src(gif, gemmi_anims[index].dsc);
             current_animation = index;
             last_swap_us = now;
+            lv_async_call(swap_animation, (void *)gemmi_anims[index].dsc);
         }
     }
 

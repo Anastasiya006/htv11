@@ -441,6 +441,64 @@ def clear_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def simulate_device(args: argparse.Namespace) -> int:
+    """A software Gemmi: polls like firmware, acks statuses, answers asks.
+
+    Lets the whole agent->bridge->device->answer loop run with no ESP32
+    connected. Uses its own device id so it never disturbs a real device.
+    """
+    device_id = args.device_id
+    last_shown = 0
+    print(f"Simulated device '{device_id}' polling {args.url} every {args.interval:g}s (Ctrl-C to stop).")
+    try:
+        while True:
+            event = bridge_request(
+                args, f"/v1/device/next?device_id={device_id}&after={last_shown}")
+            if event is None:
+                time.sleep(args.interval)
+                continue
+            last_shown = event["id"]
+            if event["kind"] == "ask":
+                print(f"\n?? #{event['id']} {event['agent']}: {event['message']}")
+            elif event["kind"] == "artifact":
+                print(f"\n<> #{event['id']} {event['agent']} [{event['state']}]: "
+                      f"{event['message']} (artifact: {event['artifact'] or 'none'})")
+            else:
+                print(f".. #{event['id']} {event['agent']} [{event['state']}]: {event['message']}")
+            if event["kind"] != "ask" or not event["choices"]:
+                bridge_request(args, "/v1/device/ack", method="POST",
+                               payload={"device_id": device_id, "event_id": event["id"]})
+                continue
+            choices = event["choices"]
+            for index, choice in enumerate(choices):
+                print(f"   [{index + 1}] {choice}")
+            if args.auto:
+                pick = choices[0]
+                print(f"   auto-answering: {pick}")
+            else:
+                pick = None
+                while pick is None:
+                    try:
+                        typed = input("   answer 1-%d: " % len(choices)).strip()
+                    except EOFError:
+                        typed = ""
+                        pick = choices[0]
+                    if pick is None:
+                        if typed in choices:
+                            pick = typed
+                        elif typed.isdigit() and 1 <= int(typed) <= len(choices):
+                            pick = choices[int(typed) - 1]
+                        else:
+                            print("   type a number or the choice text")
+            bridge_request(args, "/v1/device/respond", method="POST",
+                           payload={"device_id": device_id,
+                                    "event_id": event["id"], "choice": pick})
+            print(f"   -> answered #{event['id']}: {pick}")
+    except KeyboardInterrupt:
+        print("\nSimulated device stopped.")
+        return 0
+
+
 def tunnel(args: argparse.Namespace) -> int:
     token_path = Path(args.token_file).expanduser()
     lockdown_path = Path(args.lockdown_file).expanduser()
@@ -530,6 +588,14 @@ def build_parser() -> argparse.ArgumentParser:
     clearer.add_argument("--timeout", default=3, type=float)
     clearer.add_argument("--token-file", default=str(default_token_path()))
     clearer.set_defaults(func=clear_events)
+    sim = subcommands.add_parser("sim", help="run a software Gemmi device (no ESP32 needed)")
+    sim.add_argument("--device-id", default="gemmi-sim")
+    sim.add_argument("--interval", default=1.5, type=float, help="poll interval in seconds")
+    sim.add_argument("--auto", action="store_true", help="answer every ask with the first choice")
+    sim.add_argument("--url", default=DEFAULT_URL, help="bridge URL (or GEMMI_BRIDGE_URL)")
+    sim.add_argument("--timeout", default=3, type=float)
+    sim.add_argument("--token-file", default=str(default_token_path()))
+    sim.set_defaults(func=simulate_device)
     tunnel_parser = subcommands.add_parser("tunnel", help="manage the token-gated public Funnel")
     tunnel_parser.add_argument("tunnel_action", choices=("init", "on", "off"))
     tunnel_parser.add_argument("--port", default=DEFAULT_PORT, type=int)

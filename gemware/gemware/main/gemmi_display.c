@@ -153,6 +153,22 @@ static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
+
+    /* Debug: drop a dot at the mapped touch point to verify alignment. */
+    static lv_obj_t *dot;
+    if (data->state == LV_INDEV_STATE_PRESSED) {
+        if (!dot) {
+            dot = lv_obj_create(lv_layer_top());
+            lv_obj_set_size(dot, 12, 12);
+            lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+            lv_obj_set_style_bg_color(dot, lv_color_hex(0xE03030), 0);
+            lv_obj_set_style_border_width(dot, 0, 0);
+            lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        }
+        lv_obj_set_pos(dot, data->point.x - 6, data->point.y - 6);
+        lv_obj_remove_flag(dot, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(dot);
+    }
 }
 
 static void increase_lvgl_tick(void *arg)

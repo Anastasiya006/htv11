@@ -363,6 +363,9 @@ void gemmi_ui_init(lv_display_t *display)
     lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
     lv_gif_set_src(gif, gemmi_anims[GEMMI_ANIM_IDLE].dsc);
     lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
+    /* Frames are native 96 px; scale the image up so the sprite fills the
+     * object instead of drawing tiny in a big box. */
+    lv_image_set_scale(gif, GIF_SIZE * 256 / 96);
     lv_obj_center(gif);
 
     lv_obj_t *bubble = bubble_obj = lv_obj_create(screen);

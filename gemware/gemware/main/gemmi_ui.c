@@ -492,8 +492,8 @@ void gemmi_ui_init(lv_display_t *display)
      * below the sprite badge so nothing overlaps. */
     for (int slot = 0; slot < AGENT_ROWS; slot++) {
         agent_rows[slot] = lv_button_create(scene);
-        lv_obj_set_pos(agent_rows[slot], 4, 54 + slot * 46);
-        lv_obj_set_size(agent_rows[slot], SCENE_W - 8, 42);
+        lv_obj_set_pos(agent_rows[slot], 10, 52 + slot * 38);
+        lv_obj_set_size(agent_rows[slot], SCENE_W - 20, 32);
         lv_obj_set_style_bg_color(agent_rows[slot], lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_bg_color(agent_rows[slot], lv_color_hex(0xBBBBBB), LV_STATE_PRESSED);
         lv_obj_set_style_border_color(agent_rows[slot], lv_color_hex(0x111111), 0);

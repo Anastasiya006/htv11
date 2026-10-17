@@ -171,21 +171,22 @@ static const char *TAG = "gemmi_ui";
 
 static void apply_sprite_mode(void)
 {
+    /* Frames are native 64 px; scale factor is target * 256 / 64 = target*4. */
     if (sprite_mode == 1) {
         lv_obj_set_size(gif, 44, 44);
-        lv_image_set_scale(gif, 44 * 256 / 96);
+        lv_image_set_scale(gif, 44 * 4);
         lv_obj_align(gif, LV_ALIGN_TOP_RIGHT, -16, 4);
     } else if (sprite_mode == 2) {
         lv_obj_set_size(gif, 96, 96);
-        lv_image_set_scale(gif, 256);
+        lv_image_set_scale(gif, 96 * 4);
         lv_obj_align(gif, LV_ALIGN_TOP_LEFT, 12, 4);
     } else if (sprite_mode == 3) {
         lv_obj_set_size(gif, 96, 96);
-        lv_image_set_scale(gif, 256);
+        lv_image_set_scale(gif, 96 * 4);
         lv_obj_align(gif, LV_ALIGN_TOP_MID, 0, 10);
     } else {
         lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
-        lv_image_set_scale(gif, GIF_SIZE * 256 / 96);
+        lv_image_set_scale(gif, GIF_SIZE * 4);
         lv_obj_center(gif);
     }
     refresh_pet_look();

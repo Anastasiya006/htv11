@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Gemmi's inner monologue: watches agent activity on the bridge and posts
+short reactions as gemmi events. Needs GEMINI_API_KEY in the repo .env."""
+import json, os, sys, time, urllib.request, urllib.error
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+env = ROOT / ".env"
+for line in env.read_text().splitlines():
+    if line.startswith("GEMINI_API_KEY="):
+        os.environ.setdefault("GEMINI_API_KEY", line.split("=", 1)[1].strip().strip('"'))
+KEY = os.environ.get("GEMINI_API_KEY", "")
+URL = os.environ.get("GEMMI_BRIDGE_URL", "http://127.0.0.1:8732")
+TOKEN_FILE = Path.home() / ".local/state/gemmi/bridge-token"
+INTERVAL = float(os.environ.get("GEMMI_MIND_INTERVAL", "30"))
+
+def token():
+    return TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else ""
+
+def get(path):
+    r = urllib.request.Request(URL + path, headers={"Authorization": f"Bearer {token()}"})
+    return json.load(urllib.request.urlopen(r, timeout=10))
+
+def post_event(message, state="musing"):
+    body = json.dumps({"kind": "status", "agent": "gemmi",
+                       "state": state, "message": message, "choices": [], "artifact": ""}).encode()
+    r = urllib.request.Request(URL + "/v1/events", data=body, method="POST",
+        headers={"Authorization": f"Bearer {token()}", "Content-Type": "application/json"})
+    urllib.request.urlopen(r, timeout=10)
+
+def think(digest):
+    prompt = ("You are Gemmi, a tiny tamagotchi-style desk companion watching software "
+              "agents work. React in ONE short sentence (max 60 chars), playful but useful, "
+              "to this recent agent activity:\n" + digest)
+    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
+    r = urllib.request.Request(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        f"?key={KEY}", data=body, headers={"Content-Type": "application/json"}, method="POST")
+    data = json.load(urllib.request.urlopen(r, timeout=20))
+    return data["candidates"][0]["content"]["parts"][0]["text"].strip()[:160]
+
+def digest_events(events):
+    lines = []
+    for e in events[-12:]:
+        if e["kind"] in ("status", "log", "ask"):
+            answer = e.get("response", {}).get("choice", "")
+            lines.append(f"[{e['agent']}] {e['kind']}: {e['message']}" + (f" -> {answer}" if answer else ""))
+    return "\n".join(lines)
+
+def main():
+    if not KEY:
+        sys.exit("gemmi-mind: no GEMINI_API_KEY")
+    print(f"gemmi-mind watching {URL} every {INTERVAL:g}s")
+    last = ""
+    while True:
+        try:
+            view = get("/v1/events")
+            digest = digest_events(view.get("events", []))
+            if digest and digest != last:
+                last = digest
+                post_event(think(digest))
+                print("musing posted")
+        except Exception as e:
+            print("gemmi-mind:", e)
+        time.sleep(INTERVAL)
+
+if __name__ == "__main__":
+    main()

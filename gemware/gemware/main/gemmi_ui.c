@@ -36,9 +36,15 @@ typedef enum {
     GEMMI_ACTION_VIEW,
 } gemmi_action_t;
 
+#define AGENT_LOG_LEN 5
+#define AGENT_LOG_TEXT 41
+
 typedef struct {
     char agent[33];
     char state[33];
+    char log[AGENT_LOG_LEN][AGENT_LOG_TEXT];
+    int log_head;
+    int log_count;
 } gemmi_agent_state_t;
 
 static lv_obj_t *gif;
@@ -60,7 +66,11 @@ static gemmi_event_t last_artifact;
 static bool have_artifact;
 static gemmi_agent_state_t agent_feed[AGENT_FEED_LEN];
 static int agent_feed_count;
-static int agent_feed_cursor;
+static lv_obj_t *log_panel;
+static lv_obj_t *log_label;
+/* 0 = nav, 1 = agent list, 2 = one agent's log */
+static int agents_mode;
+static int detail_agent = -1;
 
 static uint32_t animation_for_state(const char *state)
 {
@@ -189,9 +199,53 @@ static void show_nav_dock(void)
     set_dock_caption(2, "view");
 }
 
+static void enter_agents_list(void)
+{
+    agents_mode = 1;
+    detail_agent = -1;
+    set_status(agent_feed_count ? "gemmi: pick an agent" : "gemmi sees no agents");
+    lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+    for (uint32_t slot = 0; slot < 3; slot++) {
+        char caption[40];
+        if ((int)slot < agent_feed_count && slot < 3) {
+            snprintf(caption, sizeof(caption), "%d %s", (int)slot + 1,
+                     agent_feed[slot].agent);
+        } else {
+            caption[0] = '\0';
+        }
+        set_dock_caption(slot, caption);
+    }
+}
+
+static void show_agent_detail(void)
+{
+    agents_mode = 2;
+    const gemmi_agent_state_t *entry = &agent_feed[detail_agent];
+    char status[80];
+    snprintf(status, sizeof(status), "watching %s · %s", entry->agent, entry->state);
+    set_status(status);
+    lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
+    /* Most recent line last, oldest first, one per row. */
+    char text[AGENT_LOG_LEN * (AGENT_LOG_TEXT + 1)];
+    size_t used = 0;
+    int shown = entry->log_count < AGENT_LOG_LEN ? entry->log_count : AGENT_LOG_LEN;
+    for (int row = 0; row < shown; row++) {
+        int idx = (entry->log_head - shown + row + AGENT_LOG_LEN) % AGENT_LOG_LEN;
+        used += snprintf(text + used, sizeof(text) - used, "%s\n", entry->log[idx]);
+    }
+    if (shown == 0) strlcpy(text, "no log yet\n", sizeof(text));
+    lv_label_set_text(log_label, text);
+    lv_obj_remove_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
+    set_dock_caption(0, "back");
+    set_dock_caption(1, "next");
+    set_dock_caption(2, "");
+}
+
 static void show_home(void)
 {
     ask_foreground = false;
+    agents_mode = 0;
+    lv_obj_add_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
     if (ask_pending) {
         set_status("gemmi needs an answer");
         set_bubble("ask waiting", pending_ask.message, "1 ask");
@@ -264,20 +318,30 @@ static void on_dock(lv_event_t *event)
         }
         return;
     }
+    if (agents_mode == 1) {
+        /* Agent list: dock slots are the numbered agents; tap one to open it. */
+        if (slot < agent_feed_count && slot < 3) {
+            detail_agent = slot;
+            agents_mode = 2;
+            show_agent_detail();
+        } else {
+            show_home();
+        }
+        return;
+    }
+    if (agents_mode == 2) {
+        /* Detail: slot 0 goes back to the list, slot 1 cycles agents. */
+        if (slot == 0) {
+            enter_agents_list();
+        } else if (slot == 1) {
+            detail_agent = (detail_agent + 1) % agent_feed_count;
+            show_agent_detail();
+        }
+        return;
+    }
     switch ((gemmi_action_t)(GEMMI_ACTION_AGENTS + slot)) {
     case GEMMI_ACTION_AGENTS:
-        if (agent_feed_count == 0) {
-            set_status("gemmi sees no agents");
-            lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            const gemmi_agent_state_t *entry =
-                &agent_feed[(agent_feed_cursor + agent_feed_count - 1) % agent_feed_count];
-            char status[80];
-            snprintf(status, sizeof(status), "watching %s · %s", entry->agent, entry->state);
-            set_status(status);
-            lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
-            agent_feed_cursor = (agent_feed_cursor + 1) % agent_feed_count;
-        }
+        enter_agents_list();
         play_state("working", true);
         break;
     case GEMMI_ACTION_ASKS:
@@ -311,7 +375,13 @@ static void on_dock(lv_event_t *event)
 static void on_bubble(lv_event_t *event)
 {
     LV_UNUSED(event);
-    if (ask_foreground) dismiss_ask();
+    if (ask_foreground) {
+        dismiss_ask();
+    } else if (agents_mode == 2) {
+        enter_agents_list();
+    } else if (agents_mode == 1) {
+        show_home();
+    }
 }
 
 static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t width, int16_t height,
@@ -358,6 +428,22 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_radius(scene, 0, 0);
     lv_obj_set_style_pad_all(scene, 0, 0);
     lv_obj_set_scrollable(scene, false);
+
+    /* Per-agent log view, shown over the scene while drilled into an agent. */
+    log_panel = lv_obj_create(scene);
+    lv_obj_set_pos(log_panel, 2, 2);
+    lv_obj_set_size(log_panel, SCENE_W - 4, SCENE_H - 4);
+    lv_obj_set_style_bg_color(log_panel, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(log_panel, lv_color_hex(0x111111), 0);
+    lv_obj_set_style_border_width(log_panel, 1, 0);
+    lv_obj_set_style_radius(log_panel, 0, 0);
+    lv_obj_set_style_pad_all(log_panel, 6, 0);
+    lv_obj_set_scrollable(log_panel, false);
+    lv_obj_add_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
+    log_label = lv_label_create(log_panel);
+    lv_obj_set_size(log_label, SCENE_W - 18, SCENE_H - 18);
+    lv_label_set_long_mode(log_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(log_label, lv_color_hex(0x222222), 0);
 
     gif = lv_gif_create(scene);
     lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
@@ -410,16 +496,24 @@ void gemmi_ui_init(lv_display_t *display)
 
 static void remember_agent(const gemmi_event_t *event)
 {
+    gemmi_agent_state_t *entry = NULL;
     for (int index = 0; index < agent_feed_count; index++) {
         if (strcmp(agent_feed[index].agent, event->agent) == 0) {
-            strlcpy(agent_feed[index].state, event->state, sizeof(agent_feed[index].state));
-            return;
+            entry = &agent_feed[index];
+            break;
         }
     }
-    if (agent_feed_count < AGENT_FEED_LEN) {
-        gemmi_agent_state_t *entry = &agent_feed[agent_feed_count++];
+    if (entry == NULL && agent_feed_count < AGENT_FEED_LEN) {
+        entry = &agent_feed[agent_feed_count++];
+        memset(entry, 0, sizeof(*entry));
         strlcpy(entry->agent, event->agent, sizeof(entry->agent));
-        strlcpy(entry->state, event->state, sizeof(entry->state));
+    }
+    if (entry == NULL) return;
+    strlcpy(entry->state, event->state, sizeof(entry->state));
+    if (strcmp(event->kind, "log") == 0 && event->message[0] != '\0') {
+        strlcpy(entry->log[entry->log_head], event->message, AGENT_LOG_TEXT);
+        entry->log_head = (entry->log_head + 1) % AGENT_LOG_LEN;
+        if (entry->log_count < AGENT_LOG_LEN) entry->log_count++;
     }
 }
 

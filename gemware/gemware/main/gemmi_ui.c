@@ -191,20 +191,17 @@ static void apply_sprite_mode(void)
     refresh_pet_look();
 }
 
-/* Never call lv_gif_set_src: if the new draw buffer fails to allocate the
- * widget is left with draw_buf NULL and a live frame timer, which crashes
- * the LVGL task on the next tick. A fresh object carries a fresh paused
- * timer, so a failed init just leaves the sprite absent instead. */
-static void recreate_gif(const void *dsc)
+/* lv_gif_set_src frees the old frame buffer before allocating the new one,
+ * so the freed slot usually satisfies the alloc even on a fragmented heap.
+ * The failure mode to guard: alloc fails and the widget is left with a NULL
+ * draw_buf plus a live frame timer, which crashes on the next tick. This
+ * runs inside the LVGL task, so the timer cannot fire mid-check; rebuild
+ * the widget (fresh paused timer) whenever init lost the decoder. */
+static void swap_gif(const void *dsc)
 {
-    /* The new widget needs a ~37 KB contiguous frame buffer; under heap
-     * fragmentation that alloc fails and the sprite would vanish entirely.
-     * When the largest free block cannot fit it, keep the current animation
-     * running instead. */
-    if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 42 * 1024) {
-        ESP_LOGW(TAG, "low contiguous heap; keeping animation");
-        return;
-    }
+    lv_gif_set_src(gif, dsc);
+    if (lv_image_get_src(gif) != NULL) return;
+    ESP_LOGW(TAG, "swap lost the decoder; rebuilding widget");
     lv_obj_t *parent = lv_obj_get_parent(gif);
     lv_obj_delete(gif);
     gif = lv_gif_create(parent);
@@ -213,8 +210,6 @@ static void recreate_gif(const void *dsc)
     lv_obj_add_event_cb(gif, on_rest, LV_EVENT_LONG_PRESSED, NULL);
     lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
     lv_gif_set_src(gif, dsc);
-    /* When init fails the gif keeps no image source; the sprite is just
-     * absent until the next swap retries. */
     if (lv_image_get_src(gif) == NULL) {
         ESP_LOGW(TAG, "gif init failed, free heap %u",
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
@@ -228,7 +223,7 @@ static void back_to_idle(lv_timer_t *timer)
     LV_UNUSED(timer);
     idle_timer = NULL;
     if (current_animation != GEMMI_ANIM_IDLE) {
-        recreate_gif(gemmi_anims[GEMMI_ANIM_IDLE].dsc);
+        swap_gif(gemmi_anims[GEMMI_ANIM_IDLE].dsc);
         current_animation = GEMMI_ANIM_IDLE;
     }
 }
@@ -239,7 +234,7 @@ static int64_t last_swap_us;
  * input-event handler. */
 static void swap_animation(void *dsc)
 {
-    recreate_gif(dsc);
+    swap_gif(dsc);
 }
 
 static void play_state(const char *state, bool return_to_idle)

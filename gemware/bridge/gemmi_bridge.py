@@ -210,8 +210,8 @@ def normalise_event(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("event must be a JSON object")
     kind = clean_string(payload, "kind", required=True, limit=32)
-    if kind not in {"status", "ask", "artifact"}:
-        raise ValueError("kind must be status, ask, or artifact")
+    if kind not in {"status", "ask", "artifact", "log"}:
+        raise ValueError("kind must be status, ask, artifact, or log")
     choices = payload.get("choices", [])
     if not isinstance(choices, list) or len(choices) > 3 or not all(isinstance(item, str) for item in choices):
         raise ValueError("choices must be a list of at most three strings")
@@ -302,6 +302,13 @@ class BridgeHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
             self.send_json(HTTPStatus.OK, {"ok": True, "version": 1})
+            return
+        if parsed.path.startswith("/v1/agent/"):
+            agent = parsed.path.rsplit("/", 1)[1].strip()
+            with self.store.lock:
+                events = [e for e in self.store.events
+                          if agent and e["agent"] == agent][-10:]
+            self.send_json(HTTPStatus.OK, {"agent": agent, "events": events})
             return
         if parsed.path == "/v1/events":
             with self.store.lock:
@@ -610,6 +617,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("notify", "status", "send a status update"),
         ("ask", "ask", "send a question with up to three choices"),
         ("artifact", "artifact", "announce a screenshot or other artifact"),
+        ("log", "log", "stream one activity line (CoT, tool call) to the agent feed"),
     ):
         sender = subcommands.add_parser(command, help=help_text)
         sender.add_argument("message", help="short text Gemmi should show")

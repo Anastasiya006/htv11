@@ -144,7 +144,10 @@ static void lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
     }
 
     if (touchpad_pressed && touchpad_cnt > 0) {
-        data->point.x = touchpad_x[0];
+        /* mirror_x is inert on this XPT2046 (a left press lands on the right
+         * side), so the X flip is applied here instead. LVGL then rotates the
+         * point by the display's 180. */
+        data->point.x = LCD_H_RES - 1 - touchpad_x[0];
         data->point.y = touchpad_y[0];
         data->state = LV_INDEV_STATE_PRESSED;
     } else {

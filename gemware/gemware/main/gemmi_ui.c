@@ -152,10 +152,14 @@ static void select_choice(int slot)
 {
     selected_choice = slot;
     for (uint32_t index = 0; index < 3; index++) {
+        /* States on the button do not propagate to its label child, so the
+         * caption colour is driven by hand to match the inverted fill. */
         if ((int)index == slot) {
             lv_obj_add_state(dock_buttons[index], LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(dock_labels[index], lv_color_hex(0x5AC8FF), 0);
         } else {
             lv_obj_remove_state(dock_buttons[index], LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(dock_labels[index], lv_color_hex(0x111111), 0);
         }
     }
 }
@@ -373,9 +377,10 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_add_flag(queue_label, LV_OBJ_FLAG_HIDDEN);
 
     status_label = lv_label_create(screen);
-    lv_obj_set_pos(status_label, 8, 5);
+    lv_obj_set_pos(status_label, 8, 3);
+    lv_label_set_long_mode(status_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(status_label, lv_color_hex(0x333333), 0);
-    make_label_upright(status_label, SCREEN_W - 16, 20);
+    make_label_upright(status_label, SCREEN_W - 16, 24);
 
     for (uint32_t index = 0; index < 3; index++) {
         dock_labels[index] = create_button(screen, 5 + (int16_t)index * 78, SCREEN_H - 35,

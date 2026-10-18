@@ -132,6 +132,7 @@ static int agents_mode;
 static int detail_agent = -1;
 static int agents_page;
 static bool image_pending;
+static lv_obj_t *status_icon;
 static void stop_monitor(void);
 static void layout_dock(int count);
 static void show_home(void);
@@ -345,19 +346,24 @@ static void set_status(const char *status)
     char caption[64];
     snprintf(caption, sizeof(caption), "%s", action);
     if (caption[0] >= 'a' && caption[0] <= 'z') caption[0] -= 'a' - 'A';
-    /* Status colour: blue for thinking/watching, amber when input is needed,
-     * green on success, purple while viewing an image, grey otherwise. */
+    /* Status colour follows the diamond marker: blue when working, purple
+     * when input is needed or viewing, green on success, red offline. */
     uint32_t colour = 0x444444;
-    if (!strcmp(action, "Thinking") || !strncmp(action, "watching", 8) || !strcmp(action, "working")) {
-        colour = 0x3A6AE4;
-    } else if (!strcmp(action, "Needs input") || !strcmp(action, "Confirm choice") || !strcmp(action, "Disconnected")) {
-        colour = 0xB04A1E;
-    } else if (!strcmp(action, "Answered") || !strcmp(action, "Connected")) {
-        colour = 0x2E8B57;
-    } else if (!strcmp(action, "Viewing image")) {
+    if (!strcmp(action, "Needs input") || !strcmp(action, "Confirm choice") ||
+        !strcmp(action, "Viewing image")) {
         colour = 0x8B3FD9;
+    } else if (!strcmp(action, "Answered") || !strcmp(action, "Connected") ||
+               !strcmp(action, "success")) {
+        colour = 0x2E8B57;
+    } else if (!strcmp(action, "Disconnected") || !strcmp(action, "error")) {
+        colour = 0xB04A1E;
+    } else if (strcmp(action, "idle") && strcmp(action, "Agents") &&
+               strncmp(action, "No ", 3) && strcmp(action, "Answering")) {
+        /* any real activity state: working, thinking, reading, watching… */
+        colour = 0x3A6AE4;
     }
     lv_obj_set_style_text_color(status_label, lv_color_hex(colour), 0);
+    if (status_icon) lv_obj_set_style_line_color(status_icon, lv_color_hex(colour), 0);
     lv_label_set_text(status_label, caption);
 }
 
@@ -1185,19 +1191,33 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     lv_obj_set_pos(pet_badge, 110, 8);
     lv_obj_set_size(pet_badge, 100, 12);
     lv_obj_set_style_text_font(pet_badge, UI_MONO, 0);
-    /* Small black rhombus as the gems icon at the badge's right edge. */
-    lv_obj_t *gems_icon = pet_outline(screen, 214, 9, 11, 10);
-    lv_obj_set_style_border_width(gems_icon, 0, 0);
-    for (int row = 0; row < 9; row++) {
-        int edge = row < 5 ? row : 8 - row;
-        lv_point_precise_t seg[2] = {{4 - edge, row + 1}, {6 + edge, row + 1}};
-        lv_obj_t *slice = lv_line_create(gems_icon);
-        lv_line_set_points(slice, seg, 2);
-        lv_obj_set_style_line_width(slice, 1, 0);
-        lv_obj_set_style_line_color(slice, lv_color_hex(0x111111), 0);
-        lv_obj_set_style_line_rounded(slice, false, 0);
-        lv_obj_remove_flag(slice, LV_OBJ_FLAG_CLICKABLE);
+    /* Small black rhombus as the gems icon — a real filled bitmap, not
+     * stacked line slices. |x-4|+|y-4| <= 4 fills the diamond. */
+    static uint16_t gem_px[10 * 10];
+    static bool gem_px_filled;
+    if (!gem_px_filled) {
+        for (int y = 0; y < 10; y++)
+            for (int x = 0; x < 10; x++) {
+                int dx = x - 4;
+                int dy = y - 4;
+                if (dx < 0) dx = -dx;
+                if (dy < 0) dy = -dy;
+                gem_px[y * 10 + x] = (dx + dy <= 4) ? 0x1800 : 0xFFFF;
+            }
+        gem_px_filled = true;
     }
+    static lv_image_dsc_t gem_dsc;
+    gem_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    gem_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+    gem_dsc.header.w = 10;
+    gem_dsc.header.h = 10;
+    gem_dsc.header.stride = 20;
+    gem_dsc.header.flags = 0;
+    gem_dsc.data = (const uint8_t *)gem_px;
+    gem_dsc.data_size = sizeof(gem_px);
+    lv_obj_t *gems_icon = lv_image_create(screen);
+    lv_obj_set_pos(gems_icon, 214, 10);
+    lv_image_set_src(gems_icon, &gem_dsc);
     lv_obj_set_style_text_align(pet_badge, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(pet_badge, LV_LABEL_LONG_DOT);
     lv_obj_add_flag(pet_badge, LV_OBJ_FLAG_CLICKABLE);
@@ -1418,6 +1438,7 @@ void gemmi_ui_init(lv_display_t *display)
     /* Small diamond status marker to the left of the caption. */
     static const lv_point_precise_t status_diamond[] = {{4,0},{8,4},{4,8},{0,4},{4,0}};
     lv_obj_t *badge_icon = lv_line_create(screen);
+    status_icon = badge_icon;
     lv_line_set_points(badge_icon, status_diamond, 5);
     lv_obj_set_pos(badge_icon, 9, 9);
     lv_obj_set_style_line_width(badge_icon, 2, 0);

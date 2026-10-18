@@ -134,6 +134,7 @@ static int agents_page;
 static bool image_pending;
 static bool draw_mode;
 static lv_obj_t *draw_pad, *draw_button;
+static lv_obj_t *choice_rows[3], *ask_back_row;
 static lv_obj_t *status_icon;
 static void stop_monitor(void);
 static void layout_dock(int count);
@@ -142,6 +143,9 @@ static void play_state(const char *state, bool return_to_idle);
 static void swap_animation(void *arg);
 static void on_draw_button(lv_event_t *event);
 static void enter_draw(void);
+static void send_choice(int slot);
+static void on_choice_row(lv_event_t *event);
+static void on_ask_back(lv_event_t *event);
 static lv_obj_t *pet_outline(lv_obj_t *parent, int x, int y, int width, int height);
 static lv_obj_t *pet_caption(lv_obj_t *parent, const char *text, int x, int y, int width);
 
@@ -701,6 +705,10 @@ static void show_home(void)
     hide_jpeg();
     if (draw_button) lv_obj_add_flag(draw_button, LV_OBJ_FLAG_HIDDEN);
     if (draw_pad) lv_obj_add_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < 3; i++) {
+        if (choice_rows[i]) lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (ask_back_row) lv_obj_add_flag(ask_back_row, LV_OBJ_FLAG_HIDDEN);
     ask_foreground = false;
     if (ask_back) lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
     pet_mode = 0;
@@ -834,6 +842,44 @@ static void enter_ask(void)
     sprite_mode = 0;
     lv_obj_set_height(scene_obj, SCENE_H);
     apply_sprite_mode();
+    /* Choices stack as full-width rows over the lower scene — tap a row to
+     * answer, the trailing row is back. The dock stays hidden in ask mode. */
+    int rows = pending_ask.choice_count + 1;
+    const int row_h = 26, row_gap = 5;
+    int top = SCENE_H - (rows * row_h + (rows - 1) * row_gap) - 6;
+    for (int i = 0; i < pending_ask.choice_count; i++) {
+        if (!choice_rows[i]) {
+            choice_rows[i] = pet_outline(scene_obj, 12, 0, SCENE_W - 24, row_h);
+            lv_obj_set_style_border_color(choice_rows[i], lv_color_hex(0x888888), 0);
+            lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(choice_rows[i], on_choice_row, LV_EVENT_PRESSED,
+                                (void *)(uintptr_t)i);
+            lv_obj_t *cap = pet_caption(choice_rows[i], "", 10, 6, SCENE_W - 44);
+            lv_obj_set_style_text_color(cap, lv_color_hex(0x444444), 0);
+        }
+        lv_obj_set_pos(choice_rows[i], 12, top + i * (row_h + row_gap));
+        lv_obj_set_size(choice_rows[i], SCENE_W - 24, row_h);
+        lv_label_set_text(lv_obj_get_child(choice_rows[i], 0), pending_ask.choices[i]);
+        lv_obj_remove_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(choice_rows[i]);
+    }
+    for (int i = pending_ask.choice_count; i < 3; i++) {
+        if (choice_rows[i]) lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (!ask_back_row) {
+        ask_back_row = pet_outline(scene_obj, 12, 0, SCENE_W - 24, row_h);
+        lv_obj_set_style_border_color(ask_back_row, lv_color_hex(0x888888), 0);
+        lv_obj_add_flag(ask_back_row, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(ask_back_row, on_ask_back, LV_EVENT_PRESSED, NULL);
+        lv_obj_t *cap = pet_caption(ask_back_row, "back", 10, 6, SCENE_W - 44);
+        lv_obj_set_style_text_color(cap, lv_color_hex(0x888888), 0);
+    }
+    lv_obj_set_pos(ask_back_row, 12, top + pending_ask.choice_count * (row_h + row_gap));
+    lv_obj_remove_flag(ask_back_row, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(ask_back_row);
+    set_dock_caption(0, "");
+    set_dock_caption(1, "");
+    set_dock_caption(2, "");
     lv_point_t question_size;
     lv_text_get_size(&question_size, pending_ask.message, UI_BODY, 0, 4,
                      BUBBLE_W - 20, LV_TEXT_FLAG_NONE);
@@ -878,11 +924,21 @@ static void ask_snooze_cb(lv_timer_t *timer)
  * minute — there is no asks button to reopen it manually. */
 static void dismiss_ask(void)
 {
+    for (int i = 0; i < 3; i++) {
+        if (choice_rows[i]) lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (ask_back_row) lv_obj_add_flag(ask_back_row, LV_OBJ_FLAG_HIDDEN);
     show_home();
     if (!ask_snooze) ask_snooze = lv_timer_create(ask_snooze_cb, 60000, NULL);
 }
 
 static void on_ask_back(lv_event_t *event) { LV_UNUSED(event); dismiss_ask(); }
+
+/* Row-by-row ask choices: one tap sends the answer. */
+static void on_choice_row(lv_event_t *event)
+{
+    send_choice((int)(uintptr_t)lv_event_get_user_data(event));
+}
 
 static void send_choice(int slot)
 {

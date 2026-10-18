@@ -399,7 +399,7 @@ static void set_status(const char *status)
     else if (!strncmp(status, "answer ", 7) || !strcmp(status, "gemmi needs an answer")) action = "Needs input";
     else if (!strncmp(status, "again to send:", 14)) action = "Confirm choice";
     else if (!strncmp(status, "gemmi sent:", 11)) action = "Answered";
-    else if (!strncmp(status, "gemmi is viewing", 16)) action = "Viewing image";
+    else if (!strncmp(status, "gemmi is viewing", 16)) action = "Viewing";
     else if (!strncmp(status, "Agents /", 8)) action = "Agents";
     else if (!strncmp(status, "offline", 7)) action = "Disconnected";
     else if (!strcmp(status, "gemmi is back online")) action = "Connected";
@@ -413,7 +413,7 @@ static void set_status(const char *status)
      * when input is needed or viewing, green on success, red offline. */
     uint32_t colour = 0x444444;
     if (!strcmp(action, "Needs input") || !strcmp(action, "Confirm choice") ||
-        !strcmp(action, "Viewing image")) {
+        !strcmp(action, "Viewing")) {
         colour = 0x8B3FD9;
     } else if (!strcmp(action, "Answered") || !strcmp(action, "Connected") ||
                !strcmp(action, "success")) {

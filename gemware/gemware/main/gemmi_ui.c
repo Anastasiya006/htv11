@@ -1669,6 +1669,11 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_border_color(store_button, lv_color_hex(0x888888), 0);
     lv_obj_add_flag(store_button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(store_button, on_shop, LV_EVENT_PRESSED, NULL);
+    /* Same black-on-blue press animation as the dock buttons. */
+    lv_obj_set_style_bg_color(store_button, lv_color_hex(0x111111), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(store_button, on_press_style, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(store_button, on_press_style, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(store_button, on_press_style, LV_EVENT_PRESS_LOST, NULL);
     lv_obj_t *shop_label = pet_caption(store_button, "Shop", 0, 5, 105);
     lv_obj_set_style_text_align(shop_label, LV_TEXT_ALIGN_CENTER, 0);
     ask_back = pet_outline(screen, 12, 28, 40, 19);

@@ -213,6 +213,16 @@ static bool parse_event(const char *body, gemmi_event_t *event)
          token = strtok(NULL, "|")) {
         strlcpy(event->choices[event->choice_count++], token, GEMMI_CHOICE_LEN);
     }
+    /* The panel font is ASCII-only — drop UTF-8 bytes so em-dashes and other
+     * punctuation don't render as boxes. */
+    for (char *c = event->message; *c; c++) {
+        if ((unsigned char)*c >= 0x80) *c = '-';
+    }
+    for (int i = 0; i < event->choice_count; i++) {
+        for (char *c = event->choices[i]; *c; c++) {
+            if ((unsigned char)*c >= 0x80) *c = '-';
+        }
+    }
     return true;
 }
 

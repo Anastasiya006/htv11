@@ -68,8 +68,8 @@ typedef enum {
     GEMMI_ACTION_VIEW,
 } gemmi_action_t;
 
-#define AGENT_LOG_LEN 5
-#define AGENT_LOG_TEXT 41
+#define AGENT_LOG_LEN 8
+#define AGENT_LOG_TEXT 161
 
 typedef struct {
     char agent[33];
@@ -380,7 +380,11 @@ static void set_bubble(const char *headline, const char *message, const char *qu
  * upper pixels at the frame edge. Keep their visibility coupled. */
 static void show_console(bool visible)
 {
-    if (visible) {
+    /* The bordered Gemmi chat is a home-screen element. Other views provide
+     * their own card or canvas, so never let an async event revive it there. */
+    bool home_screen = !agents_mode && !pet_mode && !draw_mode &&
+                       !ask_foreground && !image_pending;
+    if (visible && home_screen) {
         lv_obj_remove_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(console_title, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -653,13 +657,12 @@ static void show_agent_detail(void)
     for (uint32_t slot = 0; slot < AGENT_ROWS; slot++) {
         lv_obj_add_flag(agent_rows[slot], LV_OBJ_FLAG_HIDDEN);
     }
-    /* Detail puts the sprite beside the feed, a little bigger than a badge. */
-    sprite_mode = 2;
+    /* A centred detail sprite uses the whole header; the log title below
+     * identifies the agent, so there is no empty right-hand column. */
+    sprite_mode = 3;
     apply_sprite_mode();
-    if (last_musing[0]) {
-        lv_label_set_text(musing_label, last_musing);
-        lv_obj_remove_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
-    }
+    lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(log_title, entry->agent);
     /* Most recent line last, oldest first, one per row. */
     char text[AGENT_LOG_LEN * (AGENT_LOG_TEXT + 11)];
     size_t used = 0;
@@ -681,22 +684,15 @@ static void show_agent_detail(void)
     }
     if (shown == 0) strlcpy(text, "no log yet\n", sizeof(text));
     lv_label_set_text(log_label, text);
+    lv_obj_update_layout(log_panel);
+    /* Open on the newest entry; swipe upward to read the earlier lines. */
+    lv_obj_scroll_to_y(log_panel, lv_obj_get_scroll_bottom(log_panel), LV_ANIM_OFF);
     show_log(true);
     set_dock_caption(0, "back");
-    set_dock_caption(1, "next");
-    set_dock_caption(2, "");
-    layout_dock(2);
-    /* Doodle button next to the sprite — draw a picture for this agent. */
-    if (!draw_button) {
-        draw_button = pet_outline(scene_obj, 172, 44, 56, 24);
-        lv_obj_set_style_border_color(draw_button, lv_color_hex(0x888888), 0);
-        lv_obj_add_flag(draw_button, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(draw_button, on_draw_button, LV_EVENT_PRESSED, NULL);
-        lv_obj_t *cap = pet_caption(draw_button, "draw", 0, 5, 56);
-        lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
-    }
-    lv_obj_remove_flag(draw_button, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(draw_button);
+    set_dock_caption(1, "draw");
+    set_dock_caption(2, "next");
+    layout_dock(3);
+    if (draw_button) lv_obj_add_flag(draw_button, LV_OBJ_FLAG_HIDDEN);
     /* Watching an agent: alternate working and monitoring animations. */
     if (!monitor_timer) {
         monitor_phase = 0;
@@ -779,6 +775,7 @@ static void render_pet_room(const char *feedback)
     }
     sprite_mode = 3;
     apply_sprite_mode();
+    show_console(false);
     lv_obj_remove_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(shop_panel);
     const gemmi_pet_stats_t *stats = gemmi_pet_stats();
@@ -934,7 +931,7 @@ static void enter_ask(void)
         lv_obj_set_style_radius(ask_back_row, 0, 0);
         lv_obj_set_style_shadow_width(ask_back_row, 0, 0);
         lv_obj_set_style_border_color(ask_back_row, lv_color_hex(0x444444), LV_STATE_PRESSED);
-        lv_obj_set_style_bg_color(ask_back_row, lv_color_hex(0x111111), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(ask_back_row, lv_color_hex(0xF1EDF5), LV_STATE_PRESSED);
         lv_obj_add_event_cb(ask_back_row, on_ask_back, LV_EVENT_CLICKED, NULL);
         lv_obj_add_event_cb(ask_back_row, on_press_style, LV_EVENT_PRESSED, NULL);
         lv_obj_add_event_cb(ask_back_row, on_press_style, LV_EVENT_RELEASED, NULL);
@@ -957,10 +954,10 @@ static void enter_ask(void)
         lv_obj_set_style_radius(ask_confirm_row, 0, 0);
         lv_obj_set_style_shadow_width(ask_confirm_row, 0, 0);
         lv_obj_set_style_border_color(ask_confirm_row, lv_color_hex(0x444444), LV_STATE_PRESSED);
-        lv_obj_set_style_bg_color(ask_confirm_row, lv_color_hex(0x111111), LV_STATE_PRESSED);
-        lv_obj_set_style_bg_color(ask_confirm_row, lv_color_hex(0xF2F2F2), LV_STATE_DISABLED);
-        lv_obj_set_style_border_color(ask_confirm_row, lv_color_hex(0xCCCCCC), LV_STATE_DISABLED);
-        lv_obj_set_style_text_opa(ask_confirm_row, LV_OPA_60, LV_STATE_DISABLED);
+        lv_obj_set_style_bg_color(ask_confirm_row, lv_color_hex(0xF1EDF5), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(ask_confirm_row, lv_color_hex(0xE8E8E8), LV_STATE_DISABLED);
+        lv_obj_set_style_border_color(ask_confirm_row, lv_color_hex(0x999999), LV_STATE_DISABLED);
+        lv_obj_set_style_text_opa(ask_confirm_row, LV_OPA_COVER, LV_STATE_DISABLED);
         lv_obj_add_event_cb(ask_confirm_row, on_ask_confirm, LV_EVENT_CLICKED, NULL);
         lv_obj_add_event_cb(ask_confirm_row, on_press_style, LV_EVENT_PRESSED, NULL);
         lv_obj_add_event_cb(ask_confirm_row, on_press_style, LV_EVENT_RELEASED, NULL);
@@ -981,7 +978,7 @@ static void enter_ask(void)
     int row_h = 22, row_gap = 3;
     int choices_h = pending_ask.choice_count * row_h;
     int choice_gaps = pending_ask.choice_count > 0 ? pending_ask.choice_count - 1 : 0;
-    int content_h = 4 + q_h + 2 + choices_h + choice_gaps * row_gap + 3;
+    int content_h = 7 + q_h + 2 + choices_h + choice_gaps * row_gap + 1;
     /* The box remains the same compact two-option size. A third choice (and
      * Back) live in the panel's vertical scroll area instead of stretching
      * the card down the screen. */
@@ -998,8 +995,8 @@ static void enter_ask(void)
     lv_label_set_text(console_title, "Gemmi");
     lv_obj_set_pos(console_title, 20, panel_y - 5);
     lv_obj_remove_flag(console_title, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_pos(ask_q_label, 12, 4);
-    int top = 4 + q_h + 2;
+    lv_obj_set_pos(ask_q_label, 12, 7);
+    int top = 7 + q_h + 2;
     for (int i = 0; i < pending_ask.choice_count; i++) {
         lv_obj_t *caption = lv_obj_get_child(choice_rows[i], 0);
         lv_obj_set_pos(choice_rows[i], 10, top);
@@ -1033,8 +1030,8 @@ static void enter_ask(void)
         lv_obj_add_flag(choice_ticks[i], LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_set_style_bg_color(ask_confirm_row, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_border_color(ask_confirm_row, lv_color_hex(0xCCCCCC), 0);
-    lv_obj_set_style_text_color(lv_obj_get_child(ask_confirm_row, 0), lv_color_hex(0x999999), 0);
+    lv_obj_set_style_border_color(ask_confirm_row, lv_color_hex(0x999999), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(ask_confirm_row, 0), lv_color_hex(0x666666), 0);
     lv_obj_scroll_to_y(ask_panel, 0, LV_ANIM_OFF);
     lv_obj_remove_flag(ask_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(ask_panel);
@@ -1242,6 +1239,8 @@ static void on_draw_pad(lv_event_t *event)
 static void enter_draw(void)
 {
     draw_mode = true;
+    /* Leave a real header for Gemmi, then place the pad below it. */
+    lv_obj_set_height(scene_obj, 250);
     sprite_mode = 1;
     apply_sprite_mode();
     show_console(false);
@@ -1252,7 +1251,7 @@ static void enter_draw(void)
     stroke_count = stroke_len = 0;
     if (!draw_pad) {
         draw_pad = lv_obj_create(scene_obj);
-        lv_obj_set_pos(draw_pad, 12, 20);
+        lv_obj_set_pos(draw_pad, 12, 60);
         lv_obj_set_size(draw_pad, 216, 162);
         lv_obj_set_style_bg_color(draw_pad, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_border_color(draw_pad, lv_color_hex(0x888888), 0);
@@ -1266,9 +1265,10 @@ static void enter_draw(void)
     for (int i = 0; i < DRAW_STROKES; i++) {
         if (stroke_objs[i]) lv_obj_add_flag(stroke_objs[i], LV_OBJ_FLAG_HIDDEN);
     }
+    lv_obj_set_pos(draw_pad, 12, 60);
     lv_obj_remove_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(draw_pad);
-    set_status("draw for agent");
+    set_status("Draw");
     set_dock_caption(0, "send");
     set_dock_caption(1, "back");
     set_dock_caption(2, "");
@@ -1314,6 +1314,8 @@ static void on_dock(lv_event_t *event)
         if (slot == 0) {
             enter_agents_list();
         } else if (slot == 1) {
+            enter_draw();
+        } else if (slot == 2) {
             detail_agent = (detail_agent + 1) % agent_feed_count;
             show_agent_detail();
         }
@@ -1396,7 +1398,7 @@ static void on_bubble(lv_event_t *event)
     }
 }
 
-/* Press feedback: black button + blue gradient label. Button state does not
+/* Press feedback: light button wash + blue label. Button state does not
  * propagate to the label child, so the text style is driven by hand. */
 static void on_press_style(lv_event_t *event)
 {
@@ -1423,7 +1425,7 @@ static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t w
     /* Match the console frame with square grey outlines. */
     lv_obj_set_style_border_color(button, lv_color_hex(0x444444), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(button, lv_color_hex(0x444444), LV_STATE_CHECKED);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x111111), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0xF1EDF5), LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(button, lv_color_hex(0xEEEEEE), LV_STATE_CHECKED);
     /* Resistive touch often loses the release position, and CLICKED needs a
      * clean press+release inside the widget. PRESSED fires on touch-down. */
@@ -1817,9 +1819,12 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_border_width(log_panel, 1, 0);
     lv_obj_set_style_radius(log_panel, 0, 0);
     lv_obj_set_style_pad_all(log_panel, 10, 0);
-    lv_obj_set_scrollable(log_panel, false);
+    lv_obj_set_scroll_dir(log_panel, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(log_panel, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_width(log_panel, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(log_panel, lv_color_hex(0x888888), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(log_panel, LV_OPA_COVER, LV_PART_SCROLLBAR);
     lv_obj_add_flag(log_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(log_panel, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
     log_title = lv_label_create(screen);
     lv_label_set_text(log_title, "Agent log");
     lv_obj_set_pos(log_title, 20, 133);
@@ -1830,10 +1835,12 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_bg_opa(log_title, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_hor(log_title, 4, 0);
     log_label = lv_label_create(log_panel);
-    lv_obj_set_size(log_label, SCREEN_W - 46, 116);
-    lv_obj_set_style_text_font(log_label, UI_MONO, 0);
+    lv_obj_set_size(log_label, SCREEN_W - 46, LV_SIZE_CONTENT);
+    /* Body copy stays regular; only the notched "Agent log" caption uses
+     * the stronger mono/title face. */
+    lv_obj_set_style_text_font(log_label, UI_BODY, 0);
     lv_obj_set_style_text_line_space(log_label, 6, 0);
-    lv_label_set_long_mode(log_label, LV_LABEL_LONG_CLIP);
+    lv_label_set_long_mode(log_label, LV_LABEL_LONG_WRAP);
     lv_label_set_recolor(log_label, true);
     lv_obj_set_style_text_color(log_label, lv_color_hex(0x444444), 0);
 
@@ -1925,8 +1932,8 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_border_color(store_button, lv_color_hex(0x888888), 0);
     lv_obj_add_flag(store_button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(store_button, on_shop, LV_EVENT_PRESSED, NULL);
-    /* Same black-on-blue press animation as the dock buttons. */
-    lv_obj_set_style_bg_color(store_button, lv_color_hex(0x111111), LV_STATE_PRESSED);
+    /* Same light press treatment as the dock buttons. */
+    lv_obj_set_style_bg_color(store_button, lv_color_hex(0xF1EDF5), LV_STATE_PRESSED);
     lv_obj_add_event_cb(store_button, on_press_style, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(store_button, on_press_style, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(store_button, on_press_style, LV_EVENT_PRESS_LOST, NULL);
@@ -2011,7 +2018,7 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
         snprintf(status, sizeof(status), "gemmi is viewing %.40s",
                  event->artifact[0] ? event->artifact : event->agent);
         set_status(status);
-        if (!ask_foreground) {
+        if (!ask_foreground && !agents_mode) {
             show_console(true);
             set_bubble("artifact",
                        event->artifact[0] ? event->artifact : event->message, "preview");
@@ -2028,13 +2035,13 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
         snprintf(status, sizeof(status), "watching %s / %s", event->agent, event->state);
     }
     set_status(status);
-    if (!ask_foreground && !ask_pending) {
+    if (!ask_foreground && !ask_pending && !agents_mode) {
         char headline[80];
         snprintf(headline, sizeof(headline), "%s / %s", event->agent, event->state);
         show_console(true);
         set_bubble(headline, event->message, "attention needed");
     }
-    if (rewarded && !ask_foreground && !ask_pending) {
+    if (rewarded && !ask_foreground && !ask_pending && !agents_mode) {
         set_status(gemmi_pet_level() > previous_level ? "Level up!" : "Task complete");
         set_bubble("Gemmi", gemmi_pet_level() > previous_level ?
                    "Level up! +25 XP, +5 gems and a 10 gem bonus." :

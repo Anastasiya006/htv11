@@ -532,9 +532,11 @@ static void enter_agents_list(void)
             lv_obj_add_flag(agent_rows[row], LV_OBJ_FLAG_HIDDEN);
         }
     }
+    bool more = agent_feed_count > AGENT_ROWS;
     set_dock_caption(0, "back");
     set_dock_caption(1, "");
-    set_dock_caption(2, agent_feed_count > AGENT_ROWS ? "more" : "");
+    set_dock_caption(2, more ? "more" : "");
+    layout_dock(more ? 2 : 1);
 }
 
 static lv_timer_t *monitor_timer;
@@ -593,6 +595,7 @@ static void show_agent_detail(void)
     set_dock_caption(0, "back");
     set_dock_caption(1, "next");
     set_dock_caption(2, "");
+    layout_dock(2);
     /* Watching an agent: alternate working and monitoring animations. */
     if (!monitor_timer) {
         monitor_phase = 0;

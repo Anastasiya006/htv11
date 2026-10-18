@@ -735,13 +735,9 @@ static void on_dock(lv_event_t *event)
 {
     int slot = (int)(uintptr_t)lv_event_get_user_data(event);
     if (ask_foreground) {
-        if (slot == selected_choice) {
+        /* Single tap answers; the slot after the choices is still back. */
+        if (slot < pending_ask.choice_count) {
             send_choice(slot);
-        } else if (slot < pending_ask.choice_count) {
-            select_choice(slot);
-            char status[80];
-            snprintf(status, sizeof(status), "again to send: %s", pending_ask.choices[slot]);
-            set_status(status);
         } else if (slot == pending_ask.choice_count && pending_ask.choice_count < 3) {
             dismiss_ask();
         }

@@ -132,12 +132,18 @@ static int agents_mode;
 static int detail_agent = -1;
 static int agents_page;
 static bool image_pending;
+static bool draw_mode;
+static lv_obj_t *draw_pad, *draw_button;
 static lv_obj_t *status_icon;
 static void stop_monitor(void);
 static void layout_dock(int count);
 static void show_home(void);
 static void play_state(const char *state, bool return_to_idle);
 static void swap_animation(void *arg);
+static void on_draw_button(lv_event_t *event);
+static void enter_draw(void);
+static lv_obj_t *pet_outline(lv_obj_t *parent, int x, int y, int width, int height);
+static lv_obj_t *pet_caption(lv_obj_t *parent, const char *text, int x, int y, int width);
 
 static uint32_t animation_for_state(const char *state)
 {
@@ -198,6 +204,12 @@ static void apply_sprite_mode(void)
         lv_obj_set_size(gif, 96, 96);
         lv_image_set_scale(gif, 96 * 4);
         lv_obj_align(gif, LV_ALIGN_TOP_MID, 0, 10);
+    } else if (sprite_mode == 4) {
+        /* Big sprite anchored to the scene top — the ask strip only shows the
+         * head anyway; centring clipped the face. */
+        lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
+        lv_image_set_scale(gif, GIF_SIZE * 4);
+        lv_obj_align(gif, LV_ALIGN_TOP_MID, 0, 2);
     } else {
         lv_obj_set_size(gif, GIF_SIZE, GIF_SIZE);
         lv_image_set_scale(gif, GIF_SIZE * 4);
@@ -538,7 +550,7 @@ static void show_nav_dock(void)
 
 /* An artifact image stays on screen until the human taps okay — same
  * blocking-queue behaviour as an unanswered ask. */
-bool gemmi_ui_is_blocked(void) { return ask_foreground || image_pending; }
+bool gemmi_ui_is_blocked(void) { return ask_foreground || image_pending || draw_mode; }
 
 static void clear_image(void)
 {
@@ -559,6 +571,9 @@ static void set_sprite_small(void)
 static void enter_agents_list(void)
 {
     stop_monitor();
+    if (draw_button) lv_obj_add_flag(draw_button, LV_OBJ_FLAG_HIDDEN);
+    if (draw_pad) lv_obj_add_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
+    draw_mode = false;
     agents_mode = 1;
     if (store_button) lv_obj_add_flag(store_button, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(scene_obj, 250);
@@ -647,6 +662,17 @@ static void show_agent_detail(void)
     set_dock_caption(1, "next");
     set_dock_caption(2, "");
     layout_dock(2);
+    /* Doodle button next to the sprite — draw a picture for this agent. */
+    if (!draw_button) {
+        draw_button = pet_outline(scene_obj, 172, 44, 56, 24);
+        lv_obj_set_style_border_color(draw_button, lv_color_hex(0x888888), 0);
+        lv_obj_add_flag(draw_button, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(draw_button, on_draw_button, LV_EVENT_PRESSED, NULL);
+        lv_obj_t *cap = pet_caption(draw_button, "draw", 0, 5, 56);
+        lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
+    }
+    lv_obj_remove_flag(draw_button, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(draw_button);
     /* Watching an agent: alternate working and monitoring animations. */
     if (!monitor_timer) {
         monitor_phase = 0;
@@ -664,7 +690,10 @@ static void show_home(void)
 {
     stop_monitor();
     image_pending = false;
+    draw_mode = false;
     hide_jpeg();
+    if (draw_button) lv_obj_add_flag(draw_button, LV_OBJ_FLAG_HIDDEN);
+    if (draw_pad) lv_obj_add_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
     ask_foreground = false;
     if (ask_back) lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
     pet_mode = 0;
@@ -795,8 +824,8 @@ static void enter_ask(void)
     show_log(false);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
     for (int row = 0; row < AGENT_ROWS; row++) lv_obj_add_flag(agent_rows[row], LV_OBJ_FLAG_HIDDEN);
-    /* Keep the big sprite — the question bubble floats over it. */
-    sprite_mode = 0;
+    /* Big sprite anchored to the scene top — the bubble floats over it. */
+    sprite_mode = 4;
     apply_sprite_mode();
     lv_point_t question_size;
     lv_text_get_size(&question_size, pending_ask.message, UI_BODY, 0, 4,
@@ -870,9 +899,135 @@ static void send_choice(int slot)
     play_state("love", true);
 }
 
+/* --- Doodle mode: draw a picture for the agent being viewed --- */
+#define DRAW_STROKES 8
+#define DRAW_PTS 48
+static lv_obj_t *stroke_objs[DRAW_STROKES];
+static lv_point_precise_t stroke_pts[DRAW_STROKES][DRAW_PTS];
+static int stroke_count, stroke_len;
+/* Packed image: 4-byte w/h header + 96x72 RGB565 — same format artifacts use. */
+static uint8_t draw_buf[4 + 96 * 72 * 2];
+static char draw_b64[19000];
+static char draw_json[19900];
+
+static const char b64_table[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static size_t b64_encode(const uint8_t *in, size_t len, char *out)
+{
+    size_t o = 0;
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t v = (uint32_t)in[i] << 16
+                   | (uint32_t)(i + 1 < len ? in[i + 1] : 0) << 8
+                   | (uint32_t)(i + 2 < len ? in[i + 2] : 0);
+        out[o++] = b64_table[(v >> 18) & 63];
+        out[o++] = b64_table[(v >> 12) & 63];
+        out[o++] = (i + 1 < len) ? b64_table[(v >> 6) & 63] : '=';
+        out[o++] = (i + 2 < len) ? b64_table[v & 63] : '=';
+    }
+    out[o] = 0;
+    return o;
+}
+
+static void exit_draw(void)
+{
+    draw_mode = false;
+    if (draw_pad) lv_obj_add_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
+    show_home();
+}
+
+static void send_drawing(void)
+{
+    b64_encode(draw_buf, sizeof(draw_buf), draw_b64);
+    const char *who = detail_agent >= 0 && detail_agent < agent_feed_count
+                      ? agent_feed[detail_agent].agent : "agent";
+    snprintf(draw_json, sizeof(draw_json),
+             "{\"agent\":\"%s\",\"image_b64\":\"%s\"}", who, draw_b64);
+    esp_err_t sent = gemmi_bridge_post_raw("/v1/drawing", draw_json);
+    draw_mode = false;
+    if (draw_pad) lv_obj_add_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
+    show_home();
+    set_status(sent == ESP_OK ? "doodle sent" : "doodle failed");
+}
+
+static void on_draw_pad(lv_event_t *event)
+{
+    lv_indev_t *indev = lv_indev_get_act();
+    if (!indev) return;
+    lv_point_t p;
+    lv_indev_get_point(indev, &p);
+    lv_area_t area;
+    lv_obj_get_coords(draw_pad, &area);
+    int px = p.x - area.x1, py = p.y - area.y1;
+    if (px < 0 || py < 0 || px >= 216 || py >= 162) return;
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED && stroke_len > 0) {
+        stroke_count++; /* fresh stroke on lift+press */
+        stroke_len = 0;
+    }
+    if (stroke_len >= DRAW_PTS) { stroke_count++; stroke_len = 0; }
+    if (stroke_count >= DRAW_STROKES) return;
+    if (!stroke_objs[stroke_count]) {
+        stroke_objs[stroke_count] = lv_line_create(draw_pad);
+        lv_obj_set_style_line_width(stroke_objs[stroke_count], 3, 0);
+        lv_obj_set_style_line_color(stroke_objs[stroke_count], lv_color_hex(0x111111), 0);
+        lv_obj_remove_flag(stroke_objs[stroke_count], LV_OBJ_FLAG_CLICKABLE);
+    }
+    stroke_pts[stroke_count][stroke_len++] = (lv_point_precise_t){px, py};
+    int bx = px * 96 / 216, by = py * 72 / 162;
+    for (int dy = 0; dy < 2; dy++)
+        for (int dx = 0; dx < 2; dx++) {
+            int X = bx + dx, Y = by + dy;
+            if (X < 96 && Y < 72) *(uint16_t *)(draw_buf + 4 + (Y * 96 + X) * 2) = 0x1800;
+        }
+    lv_line_set_points(stroke_objs[stroke_count], stroke_pts[stroke_count], stroke_len);
+}
+
+static void enter_draw(void)
+{
+    draw_mode = true;
+    sprite_mode = 1;
+    apply_sprite_mode();
+    show_console(false);
+    show_log(false);
+    lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
+    memset(draw_buf, 0xFF, sizeof(draw_buf));
+    draw_buf[0] = 96; draw_buf[1] = 0; draw_buf[2] = 72; draw_buf[3] = 0;
+    stroke_count = stroke_len = 0;
+    if (!draw_pad) {
+        draw_pad = lv_obj_create(scene_obj);
+        lv_obj_set_pos(draw_pad, 12, 20);
+        lv_obj_set_size(draw_pad, 216, 162);
+        lv_obj_set_style_bg_color(draw_pad, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_border_color(draw_pad, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_border_width(draw_pad, 1, 0);
+        lv_obj_set_style_radius(draw_pad, 0, 0);
+        lv_obj_set_style_pad_all(draw_pad, 0, 0);
+        lv_obj_add_event_cb(draw_pad, on_draw_pad, LV_EVENT_PRESSED, NULL);
+        lv_obj_add_event_cb(draw_pad, on_draw_pad, LV_EVENT_PRESSING, NULL);
+        for (int i = 0; i < DRAW_STROKES; i++) stroke_objs[i] = NULL;
+    }
+    for (int i = 0; i < DRAW_STROKES; i++) {
+        if (stroke_objs[i]) lv_obj_add_flag(stroke_objs[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_remove_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(draw_pad);
+    set_status("draw for agent");
+    set_dock_caption(0, "send");
+    set_dock_caption(1, "back");
+    set_dock_caption(2, "");
+    layout_dock(2);
+}
+
+static void on_draw_button(lv_event_t *event) { LV_UNUSED(event); enter_draw(); }
+
 static void on_dock(lv_event_t *event)
 {
     int slot = (int)(uintptr_t)lv_event_get_user_data(event);
+    if (draw_mode) {
+        if (slot == 0) send_drawing();
+        else if (slot == 1) exit_draw();
+        return;
+    }
     if (image_pending) {
         if (slot == 0) clear_image();
         return;

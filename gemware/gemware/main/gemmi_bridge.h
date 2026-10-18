@@ -6,3 +6,6 @@ void gemmi_bridge_start(void);
 /* Queue a device reply for the poll task to POST. A NULL or empty choice is
  * a plain acknowledgement; a non-empty choice answers an ask. */
 void gemmi_bridge_answer(int event_id, const char *choice);
+
+/* POST a fully-assembled JSON body (e.g. a device-drawn doodle). */
+esp_err_t gemmi_bridge_post_raw(const char *path, const char *body);

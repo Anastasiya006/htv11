@@ -343,6 +343,22 @@ static void gemmi_bridge_task(void *arg)
     }
 }
 
+/* POST a fully-assembled JSON body — used by the doodle sender. */
+esp_err_t gemmi_bridge_post_raw(const char *path, const char *body)
+{
+    if (client == NULL && reset_client() != ESP_OK) return ESP_FAIL;
+    char url[192];
+    snprintf(url, sizeof(url), "%s%s", CONFIG_GEMMI_BRIDGE_URL, path);
+    esp_http_client_set_url(client, url);
+    esp_http_client_set_method(client, HTTP_METHOD_POST);
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_user_data(client, NULL);
+    esp_http_client_set_post_field(client, body, (int)strlen(body));
+    esp_err_t error = esp_http_client_perform(client);
+    int status = esp_http_client_get_status_code(client);
+    return (error == ESP_OK && (status == 200 || status == 201)) ? ESP_OK : ESP_FAIL;
+}
+
 void gemmi_bridge_start(void)
 {
     device_msg_queue = xQueueCreate(GEMMI_ANSWER_QUEUE_DEPTH, sizeof(gemmi_device_msg_t));

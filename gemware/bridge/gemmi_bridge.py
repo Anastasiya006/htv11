@@ -378,6 +378,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 event = self.store.append(normalise_event(json.loads(self.read_body())))
                 self.send_json(HTTPStatus.CREATED, event)
                 return
+            if parsed.path == "/v1/drawing":
+                # Device -> agent: a doodle drawn on the panel. Stored as a
+                # normal artifact event so agents can fetch it via the feed.
+                payload = json.loads(self.read_body())
+                event = self.store.append(normalise_event({
+                    "kind": "artifact",
+                    "agent": "gemmi",
+                    "state": "idle",
+                    "message": f"doodle for {payload.get('agent', 'agent')}",
+                    "artifact": "doodle",
+                    "image_b64": payload.get("image_b64", ""),
+                }))
+                self.send_json(HTTPStatus.CREATED, event)
+                return
             if parsed.path in ("/v1/device/ack", "/v1/device/respond"):
                 device_id, event_id, choice = device_payload(self.read_body())
                 if parsed.path.endswith("ack"):
@@ -528,6 +542,33 @@ def clear_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def fetch_drawing(args: argparse.Namespace) -> int:
+    """Save the newest drawing/artifact image to a PNG the agent can open."""
+    events = bridge_request(args, "/v1/events").get("events", [])
+    candidates = [e for e in events if e.get("image_b64")]
+    if not candidates:
+        raise SystemExit("No drawings or image artifacts yet.")
+    event = candidates[-1]
+    try:
+        from PIL import Image
+    except ImportError:
+        raise SystemExit("gemmi drawing needs Pillow (pip install pillow)")
+    packed = base64.b64decode(event["image_b64"])
+    w = packed[0] | (packed[1] << 8)
+    h = packed[2] | (packed[3] << 8)
+    px = packed[4:4 + w * h * 2]
+    im = Image.new("RGB", (w, h))
+    data = im.load()
+    for i in range(w * h):
+        v = px[2 * i] | (px[2 * i + 1] << 8)
+        x, y = i % w, i // w
+        data[x, y] = ((v >> 11 & 31) << 3, (v >> 5 & 63) << 2, (v & 31) << 3)
+    out = Path(args.out)
+    im.save(out)
+    print(f"#{event['id']} {event['agent']}: {event['message']} -> {out}")
+    return 0
+
+
 def simulate_device(args: argparse.Namespace) -> int:
     """A software Gemmi: polls like firmware, acks statuses, answers asks.
 
@@ -672,6 +713,12 @@ def build_parser() -> argparse.ArgumentParser:
             sender.add_argument("--artifact", default="", help="artifact name or URL Gemmi should reference")
             sender.add_argument("--file", default=None, help="local JPEG file to upload for on-device viewing")
         sender.set_defaults(func=lambda parsed, selected=kind: submit(parsed, selected))
+    drawing = subcommands.add_parser("drawing", help="save the latest device doodle/artifact image to PNG")
+    drawing.add_argument("--out", default="/tmp/gemmi-doodle.png")
+    drawing.add_argument("--url", default=DEFAULT_URL)
+    drawing.add_argument("--timeout", default=3, type=float)
+    drawing.add_argument("--token-file", default=str(default_token_path()))
+    drawing.set_defaults(func=fetch_drawing)
     waiter = subcommands.add_parser("wait", help="block until an ask event is answered")
     waiter.add_argument("event_id", type=int)
     waiter.add_argument("--wait", type=float, default=60, metavar="SECONDS")

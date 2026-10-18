@@ -491,8 +491,23 @@ def submit(args: argparse.Namespace, kind: str) -> int:
     created = bridge_request(args, "/v1/events", method="POST", payload=event)
     print(f"Queued Gemmi event #{created['id']} ({created['kind']} from {created['agent']}).")
     wait = getattr(args, "wait", 0)
-    if kind != "ask" or wait <= 0:
+    if wait <= 0:
         return 0
+    if kind != "ask":
+        # Non-ask senders: --wait holds until the device's cursor passes this
+        # event (it was displayed/acked), so scripts can pace delivery one at
+        # a time instead of dumping events on the ESP32.
+        device = os.environ.get("GEMMI_DEVICE_ID", "gemmi-esp32")
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            nxt = bridge_request(
+                args, f"/v1/device/next?device_id={device}&after={created['id'] - 1}")
+            if not nxt or nxt.get("id") != created["id"]:
+                print(f"Gemmi consumed #{created['id']}.")
+                return 0
+            time.sleep(1)
+        print(f"Timed out after {wait:g}s waiting for Gemmi to consume #{created['id']}.")
+        return 2
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
         latest = bridge_request(args, f"/v1/events/{created['id']}")
@@ -710,8 +725,8 @@ def build_parser() -> argparse.ArgumentParser:
         sender.add_argument("--token-file", default=str(default_token_path()))
         if kind == "ask":
             sender.add_argument("--choice", action="append", default=[], help="one of up to three choices")
-            sender.add_argument("--wait", type=float, default=0, metavar="SECONDS",
-                                help="block until the device answers and print the choice")
+        sender.add_argument("--wait", type=float, default=0, metavar="SECONDS",
+                            help="block until the device consumes (asks: answers) the event")
         if kind == "artifact":
             sender.add_argument("--artifact", default="", help="artifact name or URL Gemmi should reference")
             sender.add_argument("--file", default=None, help="local JPEG file to upload for on-device viewing")

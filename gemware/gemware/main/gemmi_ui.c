@@ -136,6 +136,8 @@ static lv_obj_t *status_icon;
 static void stop_monitor(void);
 static void layout_dock(int count);
 static void show_home(void);
+static void play_state(const char *state, bool return_to_idle);
+static void swap_animation(void *arg);
 
 static uint32_t animation_for_state(const char *state)
 {
@@ -241,6 +243,52 @@ static void swap_gif(const void *dsc)
     apply_sprite_mode();
 }
 
+/* Alternate between two/three anims for one state — e.g. thinking ↔ reading. */
+static lv_timer_t *cycle_timer;
+static const char *cycle_seq[4];
+static unsigned cycle_len, cycle_phase;
+static lv_timer_t *sleep_timer;
+
+static void cycle_swap(lv_timer_t *timer)
+{
+    LV_UNUSED(timer);
+    uint32_t index = animation_for_state(cycle_seq[cycle_phase++ % cycle_len]);
+    if (index != current_animation) {
+        current_animation = index;
+        lv_async_call(swap_animation, (void *)gemmi_anims[index].dsc);
+    }
+}
+
+static void stop_cycle(void)
+{
+    if (cycle_timer) { lv_timer_delete(cycle_timer); cycle_timer = NULL; }
+}
+
+static void play_state_cycle(const char **seq, unsigned len)
+{
+    memcpy(cycle_seq, seq, sizeof(const char *) * len);
+    cycle_len = len;
+    cycle_phase = 1; /* seq[0] plays first via play_state */
+    play_state(seq[0], false);
+    stop_cycle();
+    cycle_timer = lv_timer_create(cycle_swap, 2400, NULL);
+}
+
+/* Idle long enough with nothing happening → sleep until a state arrives. */
+static void go_sleep(lv_timer_t *timer)
+{
+    LV_UNUSED(timer);
+    sleep_timer = NULL;
+    play_state("sleeping", false);
+}
+static void arm_sleep(void)
+{
+    if (!sleep_timer) {
+        sleep_timer = lv_timer_create(go_sleep, 45000, NULL);
+        lv_timer_set_repeat_count(sleep_timer, 1);
+    }
+}
+
 static void back_to_idle(lv_timer_t *timer)
 {
     LV_UNUSED(timer);
@@ -249,6 +297,7 @@ static void back_to_idle(lv_timer_t *timer)
         swap_gif(gemmi_anims[GEMMI_ANIM_IDLE].dsc);
         current_animation = GEMMI_ANIM_IDLE;
     }
+    arm_sleep();
 }
 
 static int64_t last_swap_us;
@@ -262,6 +311,8 @@ static void swap_animation(void *dsc)
 
 static void play_state(const char *state, bool return_to_idle)
 {
+    stop_cycle();
+    if (sleep_timer) { lv_timer_delete(sleep_timer); sleep_timer = NULL; }
     uint32_t index = animation_for_state(state);
     /* Keep GIFs native-size, never reload an unchanged source, and coalesce
      * bursts to one swap per 300 ms. */
@@ -744,7 +795,8 @@ static void enter_ask(void)
     show_log(false);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
     for (int row = 0; row < AGENT_ROWS; row++) lv_obj_add_flag(agent_rows[row], LV_OBJ_FLAG_HIDDEN);
-    sprite_mode = 3;
+    /* Keep the big sprite — the question bubble floats over it. */
+    sprite_mode = 0;
     apply_sprite_mode();
     lv_point_t question_size;
     lv_text_get_size(&question_size, pending_ask.message, UI_BODY, 0, 4,
@@ -858,7 +910,8 @@ static void on_dock(lv_event_t *event)
     switch ((gemmi_action_t)(GEMMI_ACTION_AGENTS + slot)) {
     case GEMMI_ACTION_AGENTS:
         enter_agents_list();
-        play_state("working", true);
+        static const char *work_seq[] = {"loading", "look-left", "look-right"};
+        play_state_cycle(work_seq, 3);
         break;
     case GEMMI_ACTION_ASKS:
         if (ask_pending) {
@@ -869,7 +922,8 @@ static void on_dock(lv_event_t *event)
             set_bubble("Gemmi", "No questions waiting.", "");
             show_console(true);
             set_dock_caption(0, "back"); set_dock_caption(1, ""); set_dock_caption(2, "");
-            play_state("thinking", true);
+            static const char *think_seq[] = {"thinking", "reading"};
+            play_state_cycle(think_seq, 2);
         }
         break;
     case GEMMI_ACTION_VIEW:
@@ -1570,7 +1624,16 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
                    "Level up! +25 XP, +5 gems and a 10 gem bonus." :
                    "Nice work! +25 XP / +5 gems. Gemmi is growing with you.", "");
     }
-    play_state(event->state, rewarded);
+    /* Busy states get animation cycles instead of a single loop. */
+    static const char *ev_work[] = {"loading", "look-left", "look-right"};
+    static const char *ev_think[] = {"thinking", "reading"};
+    if (!strcmp(event->state, "working")) {
+        play_state_cycle(ev_work, 3);
+    } else if (!strcmp(event->state, "thinking")) {
+        play_state_cycle(ev_think, 2);
+    } else {
+        play_state(event->state, rewarded);
+    }
     if (rewarded && gemmi_pet_level() > previous_level && !ask_foreground && !ask_pending) {
         /* Let any queued task animation finish swapping before the celebration. */
         lv_timer_t *celebration = lv_timer_create(level_up_celebration, 350, NULL);

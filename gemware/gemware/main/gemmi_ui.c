@@ -630,7 +630,7 @@ static void refresh_pet_badge(void)
     if (!pet_badge) return;
     char text[64];
     const gemmi_pet_stats_t *stats = gemmi_pet_stats();
-    snprintf(text, sizeof(text), "Lv.%lu / %lu gems", (unsigned long)gemmi_pet_level(), (unsigned long)stats->gems);
+    snprintf(text, sizeof(text), "Lv.%lu / %lu", (unsigned long)gemmi_pet_level(), (unsigned long)stats->gems);
     lv_label_set_text(pet_badge, text);
 
 }
@@ -915,7 +915,7 @@ static void on_press_style(lv_event_t *event)
     lv_obj_t *label = lv_obj_get_child(lv_event_get_target(event), 0);
     if (!label) return;
     if (lv_event_get_code(event) == LV_EVENT_PRESSED) {
-        lv_obj_set_style_text_color(label, lv_color_hex(0x4A8AF4), 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(0x444444), 0);
     } else {
         lv_obj_set_style_text_color(label, lv_color_hex(0x444444), 0);
     }
@@ -1058,7 +1058,7 @@ static lv_obj_t *pet_caption(lv_obj_t *parent, const char *text, int x, int y, i
 {
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_set_style_text_font(label, PET_SMALL_FONT, 0);
-    lv_obj_set_style_text_color(label, lv_color_hex(0x77717E), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(0x444444), 0);
     lv_obj_set_pos(label, x, y); lv_obj_set_size(label, width, 12);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_label_set_text(label, text);
@@ -1171,11 +1171,19 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     pet_badge = lv_label_create(screen);
     lv_obj_set_pos(pet_badge, 110, 8);
     lv_obj_set_size(pet_badge, 118, 12);
-#ifdef GEMMI_SYSTEM_MENLO
-    lv_obj_set_style_text_font(pet_badge, &gemmi_menlo_8, 0);
-#else
     lv_obj_set_style_text_font(pet_badge, UI_MONO, 0);
-#endif
+    /* Small black rhombus as the gems icon at the badge's right edge. */
+    lv_obj_t *gems_icon = pet_outline(screen, 214, 9, 11, 10);
+    lv_obj_set_style_border_width(gems_icon, 0, 0);
+    for (int row = 0; row < 9; row++) {
+        int edge = row < 5 ? row : 8 - row;
+        lv_point_precise_t seg[2] = {{4 - edge, row + 1}, {6 + edge, row + 1}};
+        lv_obj_t *slice = lv_line_create(gems_icon);
+        lv_line_set_points(slice, seg, 2);
+        lv_obj_set_style_line_width(slice, 1, 0);
+        lv_obj_set_style_line_color(slice, lv_color_hex(0x111111), 0);
+        lv_obj_remove_flag(slice, LV_OBJ_FLAG_CLICKABLE);
+    }
     lv_obj_set_style_text_align(pet_badge, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(pet_badge, LV_LABEL_LONG_DOT);
     lv_obj_add_flag(pet_badge, LV_OBJ_FLAG_CLICKABLE);
@@ -1269,7 +1277,7 @@ void gemmi_ui_init(lv_display_t *display)
     list_title = lv_label_create(scene);
     lv_obj_set_pos(list_title, 12, 16);
     lv_obj_set_style_text_font(list_title, UI_MONO, 0);
-    lv_obj_set_style_text_color(list_title, lv_color_hex(0x777777), 0);
+    lv_obj_set_style_text_color(list_title, lv_color_hex(0x444444), 0);
     lv_label_set_text(list_title, "Your agents");
     lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
     for (int slot = 0; slot < AGENT_ROWS; slot++) {
@@ -1290,7 +1298,7 @@ void gemmi_ui_init(lv_display_t *display)
         lv_obj_align(label, LV_ALIGN_TOP_LEFT, 6, 1);
         agent_row_states[slot] = lv_label_create(agent_rows[slot]);
         lv_obj_set_style_text_font(agent_row_states[slot], UI_MONO, 0);
-        lv_obj_set_style_text_color(agent_row_states[slot], lv_color_hex(0x999999), 0);
+        lv_obj_set_style_text_color(agent_row_states[slot], lv_color_hex(0x444444), 0);
         lv_obj_align(agent_row_states[slot], LV_ALIGN_BOTTOM_LEFT, 6, -3);
         lv_obj_add_flag(agent_rows[slot], LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_event_cb(agent_rows[slot], on_agent_row, LV_EVENT_PRESSED,
@@ -1315,7 +1323,7 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_pos(log_title, 20, 133);
     lv_obj_add_flag(log_title, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_font(log_title, UI_MONO, 0);
-    lv_obj_set_style_text_color(log_title, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_text_color(log_title, lv_color_hex(0x444444), 0);
     lv_obj_set_style_bg_color(log_title, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(log_title, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_hor(log_title, 4, 0);
@@ -1367,7 +1375,7 @@ void gemmi_ui_init(lv_display_t *display)
     lv_label_set_text(console_title, "Gemmi");
     lv_obj_set_pos(console_title, 20, BUBBLE_Y - 5);
     lv_obj_set_style_text_font(console_title, UI_MONO, 0);
-    lv_obj_set_style_text_color(console_title, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_text_color(console_title, lv_color_hex(0x444444), 0);
     lv_obj_set_style_bg_color(console_title, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(console_title, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_hor(console_title, 4, 0);
@@ -1382,7 +1390,7 @@ void gemmi_ui_init(lv_display_t *display)
 
     queue_label = lv_label_create(bubble);
     lv_obj_set_style_text_font(queue_label, UI_MONO, 0);
-    lv_obj_set_style_text_color(queue_label, lv_color_hex(0x999999), 0);
+    lv_obj_set_style_text_color(queue_label, lv_color_hex(0x444444), 0);
     lv_obj_align(queue_label, LV_ALIGN_BOTTOM_RIGHT, -9, -7);
     /* Keep the character's full 2x sprite unobstructed. The queue state is
      * represented by the top status and three fixed bottom controls instead. */
@@ -1392,7 +1400,7 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_pos(status_label, 20, 8);
     lv_obj_set_style_text_font(status_label, UI_MONO, 0);
     lv_label_set_long_mode(status_label, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_color(status_label, lv_color_hex(0xA799B2), 0);
+    lv_obj_set_style_text_color(status_label, lv_color_hex(0x444444), 0);
     /* Small diamond status marker to the left of the caption. */
     static const lv_point_precise_t status_diamond[] = {{4,0},{8,4},{4,8},{0,4},{4,0}};
     lv_obj_t *badge_icon = lv_line_create(screen);
@@ -1414,7 +1422,7 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_border_color(store_button, lv_color_hex(0x888888), 0);
     lv_obj_add_flag(store_button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(store_button, on_shop, LV_EVENT_PRESSED, NULL);
-    lv_obj_t *shop_label = pet_caption(store_button, "shop", 0, 5, 105);
+    lv_obj_t *shop_label = pet_caption(store_button, "Shop", 0, 5, 105);
     lv_obj_set_style_text_align(shop_label, LV_TEXT_ALIGN_CENTER, 0);
     ask_back = pet_outline(screen, 12, 28, 40, 19);
     lv_obj_set_style_border_color(ask_back, lv_color_hex(0x888888), 0);

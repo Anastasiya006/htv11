@@ -832,7 +832,7 @@ static void enter_ask(void)
     for (int row = 0; row < AGENT_ROWS; row++) lv_obj_add_flag(agent_rows[row], LV_OBJ_FLAG_HIDDEN);
     /* Keep the same big centred sprite as home — the bubble floats over it. */
     sprite_mode = 0;
-    lv_obj_set_height(scene_obj, 250);
+    lv_obj_set_height(scene_obj, SCENE_H);
     apply_sprite_mode();
     lv_point_t question_size;
     lv_text_get_size(&question_size, pending_ask.message, UI_BODY, 0, 4,

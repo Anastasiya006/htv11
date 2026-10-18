@@ -55,7 +55,7 @@ static const char *TAG = "gemmi_display";
 #define LCD_CMD_BITS            8
 #define LCD_PARAM_BITS          8
 
-#define LVGL_DRAW_BUF_LINES     40
+#define LVGL_DRAW_BUF_LINES     24
 #define LVGL_TICK_PERIOD_MS     2
 #define LVGL_TASK_MAX_DELAY_MS  500
 #define LVGL_TASK_MIN_DELAY_MS  (1000 / CONFIG_FREERTOS_HZ)

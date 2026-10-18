@@ -11,11 +11,9 @@ const gemmi_pet_item_t gemmi_pet_items[] = {
     {"Witch hat", "A little spellwork.", 12},
     {"Pumpkin beanie", "Warm autumn circuits.", 12},
     {"Bat bow tie", "A tiny night flight.", 9},
-    {"Moon scarf", "A cool lunar wrap.", 9},
     {"Candy bandana", "Sweet and ready.", 9},
     {"Ghost cookie", "A spooky snack.", 4},
     {"Candy corn", "A bright little treat.", 3},
-    {"Pumpkin cupcake", "The frosting upgrade.", 5},
 };
 /* Versioned, fixed-size save; event high-water marks survive restarts. */
 typedef struct { char name[33]; int32_t last_id; uint32_t active; } agent_t;

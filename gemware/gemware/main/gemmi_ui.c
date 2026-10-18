@@ -24,19 +24,15 @@
 #include "halloween_assets/shop/witch-hat.inc"
 #include "halloween_assets/shop/pumpkin-beanie.inc"
 #include "halloween_assets/shop/bat-bow.inc"
-#include "halloween_assets/shop/moon-scarf.inc"
 #include "halloween_assets/shop/candy-bandana.inc"
 #include "halloween_assets/shop/ghost-cookie.inc"
 #include "halloween_assets/shop/candy-corn.inc"
-#include "halloween_assets/shop/pumpkin-cupcake.inc"
 #include "halloween_assets/overlay/witch-hat.inc"
 #include "halloween_assets/overlay/pumpkin-beanie.inc"
 #include "halloween_assets/overlay/bat-bow.inc"
-#include "halloween_assets/overlay/moon-scarf.inc"
 #include "halloween_assets/overlay/candy-bandana.inc"
 #include "halloween_assets/overlay/ghost-cookie.inc"
 #include "halloween_assets/overlay/candy-corn.inc"
-#include "halloween_assets/overlay/pumpkin-cupcake.inc"
 #ifdef GEMMI_SYSTEM_MENLO
 #include "gemmi_ui_scale.h"
 #endif
@@ -46,25 +42,21 @@
  * at draw time allocated from a heap the GIF kept fragmenting; the re-decode
  * eventually failed and the sprite vanished. Native pixels never decode. */
 #define SHOP_ASSET(sym, width, height) { .header.magic = LV_IMAGE_HEADER_MAGIC, .header.cf = LV_COLOR_FORMAT_ARGB8888, .header.w = width, .header.h = height, .header.stride = (width) * 4, .data_size = sizeof(sym), .data = sym }
-static const lv_image_dsc_t halloween_shop_pngs[8] = {
+static const lv_image_dsc_t halloween_shop_pngs[6] = {
     SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_witch_hat_png, 32, 32),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_pumpkin_beanie_png, 32, 32),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_bat_bow_png, 32, 32),
-    SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_moon_scarf_png, 32, 32),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_candy_bandana_png, 32, 32),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_ghost_cookie_png, 32, 32),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_candy_corn_png, 32, 32),
-    SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_pumpkin_cupcake_png, 32, 32),
 };
-static const lv_image_dsc_t halloween_overlay_pngs[8] = {
+static const lv_image_dsc_t halloween_overlay_pngs[6] = {
     SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_witch_hat_png, 96, 96),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_pumpkin_beanie_png, 96, 96),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_bat_bow_png, 96, 96),
-    SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_moon_scarf_png, 96, 96),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_candy_bandana_png, 96, 96),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_ghost_cookie_png, 96, 96),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_candy_corn_png, 96, 96),
-    SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_pumpkin_cupcake_png, 96, 96),
 };
 #undef SHOP_ASSET
 
@@ -148,10 +140,11 @@ static bool gem_icon_ready;
 static lv_obj_t *store_button;
 static lv_obj_t *shop_previews[4], *shop_names[4], *shop_title;
 static unsigned shop_page;
-static const int shop_catalog[8] = {0, 1, 2, 7, 3, 4, 5, 6};
+/* Six wearables + two sentinel slots that trigger the free-treat care path. */
+static const int shop_catalog[8] = {0, 1, 2, 3, 4, 5, 6, 6};
 static void draw_shop_preview(lv_obj_t *preview, unsigned item);
 static lv_obj_t *pet_glasses, *pet_crown, *pet_bow;
-static lv_obj_t *pet_halo, *pet_antenna, *pet_scarf, *pet_horns;
+static lv_obj_t *pet_halo, *pet_scarf, *pet_horns;
 static lv_obj_t *pet_item_image;
 static lv_timer_t *shop_overlay_timer;
 static lv_obj_t *jpeg_view;
@@ -242,6 +235,7 @@ static lv_obj_t *pet_caption(lv_obj_t *parent, const char *text, int x, int y, i
 
 static uint32_t animation_for_state(const char *state)
 {
+    if (state == NULL || *state == '\0') return GEMMI_ANIM_IDLE;
     for (uint32_t index = 0; index < gemmi_anims_count; index++) {
         if (strcmp(gemmi_anims[index].name, state) == 0) return index;
     }
@@ -333,18 +327,20 @@ static void swap_gif(const void *dsc)
         ESP_LOGW(TAG, "low contiguous heap; keeping animation");
         return;
     }
-    lv_obj_t *parent = lv_obj_get_parent(gif);
-    lv_obj_delete(gif);
-    gif = lv_gif_create(parent);
+    /* Reuse the widget — delete+create churns the widget, its callbacks and
+     * the decoder every cycle swap and fragments the heap over minutes. */
     if (gif == NULL) {
-        ESP_LOGW(TAG, "gif alloc failed, free heap %u",
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
-        return;
+        gif = lv_gif_create(lv_obj_get_parent(scene_obj) ? lv_obj_get_parent(scene_obj) : scene_obj);
+        if (gif == NULL) {
+            ESP_LOGW(TAG, "gif alloc failed, free heap %u",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+            return;
+        }
+        lv_obj_add_flag(gif, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(gif, on_pet, LV_EVENT_PRESSED, NULL);
+        lv_obj_add_event_cb(gif, on_rest, LV_EVENT_LONG_PRESSED, NULL);
+        lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
     }
-    lv_obj_add_flag(gif, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(gif, on_pet, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(gif, on_rest, LV_EVENT_LONG_PRESSED, NULL);
-    lv_gif_set_color_format(gif, LV_COLOR_FORMAT_ARGB8888);
     lv_gif_set_src(gif, dsc);
     if (lv_image_get_src(gif) == NULL) {
         ESP_LOGW(TAG, "gif init failed, free heap %u",
@@ -1291,6 +1287,7 @@ static void clear_drawing(void)
 
 static void send_drawing(void)
 {
+    ESP_LOGI("draw", "send_drawing: %d strokes", stroke_count);
     const char *who = detail_agent >= 0 && detail_agent < agent_feed_count
                       ? agent_feed[detail_agent].agent : "agent";
     esp_err_t sent = gemmi_bridge_post_drawing(who, draw_buf, sizeof(draw_buf));
@@ -1603,7 +1600,6 @@ static void refresh_pet_look(void)
     lv_obj_add_flag(pet_crown, LV_OBJ_FLAG_HIDDEN);
     if (pet_bow) lv_obj_add_flag(pet_bow, LV_OBJ_FLAG_HIDDEN);
     if (pet_halo) lv_obj_add_flag(pet_halo, LV_OBJ_FLAG_HIDDEN);
-    if (pet_antenna) lv_obj_add_flag(pet_antenna, LV_OBJ_FLAG_HIDDEN);
     if (pet_scarf) lv_obj_add_flag(pet_scarf, LV_OBJ_FLAG_HIDDEN);
     if (pet_horns) lv_obj_add_flag(pet_horns, LV_OBJ_FLAG_HIDDEN);
     if (pet_item_image) lv_obj_add_flag(pet_item_image, LV_OBJ_FLAG_HIDDEN);
@@ -1661,10 +1657,6 @@ static void refresh_pet_look(void)
         lv_obj_remove_flag(pet_halo, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_pos(pet_halo, sprite_mode == 0 ? 100 : 100, sprite_mode == 0 ? 2 : 0);
     }
-    if (visible && equipped == GEMMI_PET_ANTENNA + 1 && pet_antenna) {
-        lv_obj_remove_flag(pet_antenna, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_pos(pet_antenna, sprite_mode == 0 ? 114 : 114, sprite_mode == 0 ? 0 : 0);
-    }
     if (visible && equipped == GEMMI_PET_SCARF + 1 && pet_scarf) {
         lv_obj_remove_flag(pet_scarf, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_pos(pet_scarf, 86, sprite_mode == 0 ? 100 : 64);
@@ -1678,7 +1670,6 @@ static void refresh_pet_look(void)
     lv_obj_move_foreground(pet_crown);
     if (pet_bow) lv_obj_move_foreground(pet_bow);
     if (pet_halo) lv_obj_move_foreground(pet_halo);
-    if (pet_antenna) lv_obj_move_foreground(pet_antenna);
     if (pet_scarf) lv_obj_move_foreground(pet_scarf);
     if (pet_horns) lv_obj_move_foreground(pet_horns);
     if (pet_item_image) lv_obj_move_foreground(pet_item_image);
@@ -1765,17 +1756,6 @@ static void draw_shop_preview(lv_obj_t *preview, unsigned item)
         } else if (item == GEMMI_PET_HALO) {
             static const lv_point_precise_t halo[] = {PP(4,9),PP(7,6),PP(11,5),PP(15,6),PP(18,9),PP(15,12),PP(11,13),PP(7,12),PP(4,9)};
             pet_path(preview, halo, 9, 0xC9A227);
-        } else if (item == GEMMI_PET_ANTENNA) {
-            static const lv_point_precise_t stalk[] = {PP(11,20),PP(11,8)};
-            pet_path(preview, stalk, 2, 0x6D6487);
-            lv_obj_t *bob = pet_outline(preview, 9, 3, 5, 5);
-            lv_obj_set_style_radius(bob, LV_RADIUS_CIRCLE, 0);
-            lv_obj_set_style_bg_color(bob, lv_color_hex(0xD4556B), 0);
-            lv_obj_set_style_bg_opa(bob, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_width(bob, 0, 0);
-            static const lv_point_precise_t wave1[] = {PP(5,7),PP(7,4),PP(9,7)};
-            static const lv_point_precise_t wave2[] = {PP(13,7),PP(15,4),PP(17,7)};
-            pet_path(preview, wave1, 3, 0x7399BD); pet_path(preview, wave2, 3, 0x7399BD);
         } else if (item == GEMMI_PET_SCARF) {
             static const lv_point_precise_t scarf[] = {PP(2,8),PP(8,5),PP(14,5),PP(20,8),PP(20,13),PP(14,16),PP(8,16),PP(2,13),PP(2,8)};
             pet_path(preview, scarf, 9, 0xB58297);
@@ -1897,15 +1877,6 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     lv_obj_set_style_radius(pet_halo, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_color(pet_halo, lv_color_hex(0xC9A227), 0);
     lv_obj_set_style_border_width(pet_halo, 2, 0);
-    pet_antenna = pet_outline(scene, 115, 0, 12, 14);
-    lv_obj_set_style_border_width(pet_antenna, 0, 0);
-    static const lv_point_precise_t ant_stem[] = {{6,13},{6,5}};
-    pet_path(pet_antenna, ant_stem, 2, 0x6D6487);
-    lv_obj_t *ant_bob = pet_outline(pet_antenna, 3, 0, 6, 6);
-    lv_obj_set_style_radius(ant_bob, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(ant_bob, lv_color_hex(0xD4556B), 0);
-    lv_obj_set_style_bg_opa(ant_bob, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(ant_bob, 0, 0);
     pet_scarf = pet_outline(scene, 86, 98, 68, 16);
     lv_obj_set_style_border_width(pet_scarf, 0, 0);
     lv_obj_t *band = pet_outline(pet_scarf, 0, 0, 68, 8);
@@ -2234,5 +2205,10 @@ void gemmi_ui_show_event(const gemmi_event_t *event)
         /* Let any queued task animation finish swapping before the celebration. */
         lv_timer_t *celebration = lv_timer_create(level_up_celebration, 350, NULL);
         lv_timer_set_repeat_count(celebration, 1);
+        /* Same task as the poll — a sequential POST is safe. The event loops
+         * back as a status and fires the host's level-up chime. */
+        gemmi_bridge_post_raw("/v1/events",
+            "{\"agent\":\"gemmi\",\"kind\":\"status\",\"state\":\"level-up\","
+            "\"message\":\"Gemmi leveled up\"}");
     }
 }

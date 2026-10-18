@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "gemmi_bridge.h"
@@ -69,6 +70,9 @@ static esp_err_t collect_response(esp_http_client_event_t *event)
 /* One persistent client per session: a fresh TLS handshake to the Funnel on
  * every poll burns a full CPU core for seconds and trips the task watchdog. */
 static esp_http_client_handle_t client;
+/* The LVGL task can POST (doodles, level-ups) while the poll task is mid-
+ * request — esp_http_client is not thread-safe, so every use serializes. */
+static SemaphoreHandle_t client_lock;
 
 static esp_err_t reset_client(void)
 {
@@ -98,7 +102,11 @@ static esp_err_t reset_client(void)
  * backslashes are escaped before they are framed. */
 static esp_err_t bridge_post(const char *path, int event_id, const char *choice)
 {
-    if (client == NULL && reset_client() != ESP_OK) return ESP_FAIL;
+    xSemaphoreTake(client_lock, portMAX_DELAY);
+    if (client == NULL && reset_client() != ESP_OK) {
+        xSemaphoreGive(client_lock);
+        return ESP_FAIL;
+    }
 
     char url[192];
     snprintf(url, sizeof(url), "%s%s", CONFIG_GEMMI_BRIDGE_URL, path);
@@ -138,8 +146,10 @@ static esp_err_t bridge_post(const char *path, int event_id, const char *choice)
     }
     if (error != ESP_OK || status >= 300) {
         ESP_LOGW(TAG, "POST %s failed: %s (%d)", path, esp_err_to_name(error), status);
+        xSemaphoreGive(client_lock);
         return ESP_FAIL;
     }
+    xSemaphoreGive(client_lock);
     return ESP_OK;
 }
 
@@ -150,7 +160,11 @@ static esp_err_t bridge_post(const char *path, int event_id, const char *choice)
 static gemmi_image_t fetch_image(int event_id)
 {
     img.len = 0;
-    if (client == NULL && reset_client() != ESP_OK) return img;
+    xSemaphoreTake(client_lock, portMAX_DELAY);
+    if (client == NULL && reset_client() != ESP_OK) {
+        xSemaphoreGive(client_lock);
+        return img;
+    }
     char url[192];
     snprintf(url, sizeof(url), "%s/v1/events/%d/image", CONFIG_GEMMI_BRIDGE_URL, event_id);
     esp_http_client_set_url(client, url);
@@ -167,8 +181,10 @@ static gemmi_image_t fetch_image(int event_id)
              img.len > 0 ? img.buf[0] : 0, img.len > 1 ? img.buf[1] : 0,
              img.len > 2 ? img.buf[2] : 0, img.len > 3 ? img.buf[3] : 0);
     if (error != ESP_OK || status != 200 || img.len == 0) {
+        xSemaphoreGive(client_lock);
         return (gemmi_image_t){0};
     }
+    xSemaphoreGive(client_lock);
     return img;
 }
 
@@ -253,8 +269,17 @@ static void gemmi_bridge_task(void *arg)
 #endif
     bool just_shown = false;
     int poll_failures = 0;
+    int heap_ticks = 0;
     while (true) {
         gemmi_device_msg_t outgoing;
+        /* Track heap health so fragmentation shows up in serial before the
+         * first NULL-deref crash does. */
+        if (++heap_ticks * (just_shown ? 50 : GEMMI_POLL_INTERVAL_MS) >= 30000) {
+            heap_ticks = 0;
+            ESP_LOGI(TAG, "heap free=%u largest=%u",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        }
         /* After displaying an event, poll again quickly so a burst of queued
          * events drains fast; idle periods keep the relaxed cadence. */
         TickType_t wait = pdMS_TO_TICKS(just_shown ? 50 : GEMMI_POLL_INTERVAL_MS);
@@ -298,7 +323,13 @@ static void gemmi_bridge_task(void *arg)
         }
         blocked_iters = 0;
 
-        if (client == NULL && reset_client() != ESP_OK) continue;
+        xSemaphoreTake(client_lock, portMAX_DELAY);
+        if (client == NULL && reset_client() != ESP_OK) {
+            ESP_LOGW(TAG, "http client init failed — retrying");
+            xSemaphoreGive(client_lock);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
         snprintf(url, sizeof(url), "%s/v1/device/next?device_id=%s&after=%d",
                  CONFIG_GEMMI_BRIDGE_URL, CONFIG_GEMMI_DEVICE_ID, last_shown_id);
         esp_http_client_set_url(client, url);
@@ -312,6 +343,7 @@ static void gemmi_bridge_task(void *arg)
         if (error != ESP_OK) {
             ESP_LOGD(TAG, "bridge unavailable: %s", esp_err_to_name(error));
             reset_client();
+            xSemaphoreGive(client_lock);
             if (++poll_failures == 3) {
                 gemmi_display_lock();
                 gemmi_ui_offline(true);
@@ -319,6 +351,7 @@ static void gemmi_bridge_task(void *arg)
             }
             continue;
         }
+        xSemaphoreGive(client_lock);
         if (poll_failures >= 3) {
             gemmi_display_lock();
             gemmi_ui_offline(false);
@@ -366,7 +399,11 @@ static void gemmi_bridge_task(void *arg)
 /* POST a fully-assembled JSON body — used by the doodle sender. */
 esp_err_t gemmi_bridge_post_raw(const char *path, const char *body)
 {
-    if (client == NULL && reset_client() != ESP_OK) return ESP_FAIL;
+    xSemaphoreTake(client_lock, portMAX_DELAY);
+    if (client == NULL && reset_client() != ESP_OK) {
+        xSemaphoreGive(client_lock);
+        return ESP_FAIL;
+    }
     char url[192];
     snprintf(url, sizeof(url), "%s%s", CONFIG_GEMMI_BRIDGE_URL, path);
     esp_http_client_set_url(client, url);
@@ -392,6 +429,7 @@ esp_err_t gemmi_bridge_post_raw(const char *path, const char *body)
         ESP_LOGW(TAG, "post_raw %s failed: err=%s status=%d", path,
                  esp_err_to_name(error), status);
     }
+    xSemaphoreGive(client_lock);
     return (error == ESP_OK && (status == 200 || status == 201)) ? ESP_OK : ESP_FAIL;
 }
 
@@ -399,7 +437,11 @@ esp_err_t gemmi_bridge_post_raw(const char *path, const char *body)
  * no ~11KB contiguous body is needed (which fragments TLS allocations). */
 esp_err_t gemmi_bridge_post_drawing(const char *agent, const uint8_t *buf, size_t len)
 {
-    if (client == NULL && reset_client() != ESP_OK) return ESP_FAIL;
+    xSemaphoreTake(client_lock, portMAX_DELAY);
+    if (client == NULL && reset_client() != ESP_OK) {
+        xSemaphoreGive(client_lock);
+        return ESP_FAIL;
+    }
     char url[192];
     snprintf(url, sizeof(url), "%s/v1/drawing", CONFIG_GEMMI_BRIDGE_URL);
     esp_http_client_set_url(client, url);
@@ -476,13 +518,16 @@ esp_err_t gemmi_bridge_post_drawing(const char *agent, const uint8_t *buf, size_
     if (error != ESP_OK || (status != 200 && status != 201)) {
         ESP_LOGW(TAG, "doodle POST failed: err=%s status=%d",
                  esp_err_to_name(error), status);
+        xSemaphoreGive(client_lock);
         return ESP_FAIL;
     }
+    xSemaphoreGive(client_lock);
     return ESP_OK;
 }
 
 void gemmi_bridge_start(void)
 {
+    client_lock = xSemaphoreCreateMutex();
     device_msg_queue = xQueueCreate(GEMMI_ANSWER_QUEUE_DEPTH, sizeof(gemmi_device_msg_t));
     xTaskCreate(gemmi_bridge_task, "gemmi_bridge", 8192, NULL, 3, NULL);
 }

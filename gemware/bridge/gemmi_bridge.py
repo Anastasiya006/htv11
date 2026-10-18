@@ -411,11 +411,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 device_id, event_id, choice = device_payload(self.read_body())
                 if parsed.path.endswith("ack"):
                     self.store.ack(device_id, event_id)
+                    if self.audio:
+                        self.audio.test("respond")
                     self.send_json(HTTPStatus.NO_CONTENT)
                 else:
                     if choice is None:
                         raise ValueError("choice is required")
                     self.send_json(HTTPStatus.OK, self.store.respond(device_id, event_id, choice))
+                    if self.audio:
+                        self.audio.test("respond")
                 return
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
         except (ValueError, json.JSONDecodeError) as error:

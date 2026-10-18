@@ -26,7 +26,8 @@ class AudioTests(unittest.TestCase):
             data = ga.validate_wav(ga.chime(cue))
             with wave.open(io.BytesIO(data)) as wav:
                 self.assertEqual(wav.getframerate(), 24000)
-                self.assertLess(wav.getnframes() / 24000, 1)
+                # Jingles (level-up fanfare) run a little over a second.
+                self.assertLess(wav.getnframes() / 24000, 3)
 
     def test_routine_activity_is_silent(self):
         service = self.service()

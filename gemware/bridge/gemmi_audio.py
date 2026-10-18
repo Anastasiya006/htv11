@@ -27,9 +27,19 @@ from pathlib import Path
 from typing import Callable
 
 CUES = {
-    "ready": (1047, 1568, 2093), "ask": (1319, 1047, 1319),
-    "success": (1047, 1319, 1568, 2093), "error": (784, 622),
-    "artifact": (1568, 2093), "level-up": (1047, 1319, 1568, 2093, 2637),
+    "ready": ((1047, 75), (1568, 75), (2093, 75)),
+    "ask": ((1319, 75), (1047, 75), (1319, 75)),
+    "success": ((1047, 75), (1319, 75), (1568, 75), (2093, 75)),
+    "error": ((784, 75), (622, 75)),
+    "artifact": ((1568, 75), (2093, 75)),
+    "respond": ((1568, 75), (2093, 75), (1568, 75)),
+    "doodle": ((1047, 60), (1568, 60), (2093, 60), (1568, 90)),
+    # Course-clear style fanfare: snappy run up, held high, little flag-dance.
+    "level-up": (
+        (523, 70), (659, 70), (784, 70), (1047, 70),
+        (1175, 70), (1319, 70), (1568, 140),
+        (1047, 60), (1319, 60), (1568, 60), (2093, 220),
+    ),
 }
 DEFAULT_MODEL = "gemini-3.8-flash-tts"
 
@@ -65,8 +75,10 @@ def event_cue(event: dict) -> str | None:
         return "ask"
     if event.get("state") in ("error", "failed"):
         return "error"
+    if event.get("state") == "level-up":
+        return "level-up"
     if event.get("kind") == "artifact":
-        return "artifact"
+        return "doodle" if event.get("artifact") == "doodle" else "artifact"
     if event.get("kind") == "status" and event.get("state") in ("success", "done", "completed"):
         return "success"
     return None
@@ -82,6 +94,8 @@ def speech_text(event: dict, cue: str) -> str:
         "artifact": "There is something new to look at!",
         "ready": "Hi! I am Gemmi. Your little coding companion.",
         "level-up": "Level up! Look at us go!",
+        "respond": "Got it!",
+        "doodle": "A doodle arrived!",
     }[cue]
 
 
@@ -89,8 +103,8 @@ def chime(cue: str) -> bytes:
     notes = CUES[cue]
     rate = 24000
     frames = bytearray()
-    for frequency in notes:
-        count = int(rate * 0.075)
+    for frequency, ms in notes:
+        count = int(rate * ms / 1000)
         # Band-limited square-wave bleeps: an original virtual-pet sound,
         # with a quick chirp and soft edges rather than a harsh full-scale buzz.
         harmonics = [h for h in (1, 3, 5, 7) if h * frequency * 1.08 < rate / 2]

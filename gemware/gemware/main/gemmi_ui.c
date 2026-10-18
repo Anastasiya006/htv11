@@ -131,7 +131,10 @@ static char last_musing[161];
 static int agents_mode;
 static int detail_agent = -1;
 static int agents_page;
+static bool image_pending;
 static void stop_monitor(void);
+static void layout_dock(int count);
+static void show_home(void);
 
 static uint32_t animation_for_state(const char *state)
 {
@@ -409,8 +412,21 @@ void gemmi_ui_show_image(uint8_t *data, size_t len)
     jpeg_dsc.data_size = len - 4;
     lv_image_set_src(jpeg_view, &jpeg_dsc);
     lv_image_set_scale(jpeg_view, 440); /* ~1.7x zoom, no extra buffer */
-    /* Buffer only — `view` reveals it. */
-    lv_obj_add_flag(jpeg_view, LV_OBJ_FLAG_HIDDEN);
+    /* Blocking view: the image stays until the human taps okay. */
+    image_pending = true;
+    if (store_button) lv_obj_add_flag(store_button, LV_OBJ_FLAG_HIDDEN);
+    if (ask_back) lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
+    show_console(false);
+    sprite_mode = 1;
+    apply_sprite_mode();
+    lv_obj_remove_flag(jpeg_view, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(jpeg_view);
+    set_dock_caption(0, "okay");
+    layout_dock(1);
+    char status[80];
+    snprintf(status, sizeof(status), "gemmi is viewing %.40s",
+             last_artifact.artifact[0] ? last_artifact.artifact : last_artifact.agent);
+    set_status(status);
 }
 
 static void hide_jpeg(void)
@@ -418,13 +434,49 @@ static void hide_jpeg(void)
     if (jpeg_view) lv_obj_add_flag(jpeg_view, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* Lay out `count` dock buttons evenly across the dock strip (x 12..228). */
+static void layout_dock(int count)
+{
+    int width = (216 - (count - 1) * 6) / count;
+    for (int index = 0; index < 3; index++) {
+        if (index < count) {
+            lv_obj_set_pos(dock_buttons[index], 12 + index * (width + 6), SCREEN_H - 34);
+            lv_obj_set_size(dock_buttons[index], width, 24);
+            lv_obj_remove_flag(dock_buttons[index], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(dock_buttons[index], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
 static void show_nav_dock(void)
 {
     select_choice(-1);
     set_dock_caption(0, "agents");
-    set_dock_caption(1, "asks");
-    set_dock_caption(2, "view");
-    if (store_button) lv_obj_remove_flag(store_button, LV_OBJ_FLAG_HIDDEN);
+    /* agents left half, shop right half — the two nav buttons. */
+    lv_obj_set_pos(dock_buttons[0], 12, SCREEN_H - 34);
+    lv_obj_set_size(dock_buttons[0], 105, 24);
+    lv_obj_remove_flag(dock_buttons[0], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(dock_buttons[1], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(dock_buttons[2], LV_OBJ_FLAG_HIDDEN);
+    if (store_button) {
+        lv_obj_set_pos(store_button, 123, SCREEN_H - 34);
+        lv_obj_set_size(store_button, 105, 24);
+        lv_obj_remove_flag(store_button, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/* An artifact image stays on screen until the human taps okay — same
+ * blocking-queue behaviour as an unanswered ask. */
+bool gemmi_ui_is_blocked(void) { return ask_foreground || image_pending; }
+
+static void clear_image(void)
+{
+    image_pending = false;
+    hide_jpeg();
+    /* The ack for this artifact goes out here, not on arrival. */
+    gemmi_bridge_answer(last_artifact.id, NULL);
+    show_home();
 }
 
 static void set_sprite_small(void)
@@ -538,6 +590,7 @@ static void set_sprite_home(void)
 static void show_home(void)
 {
     stop_monitor();
+    image_pending = false;
     hide_jpeg();
     ask_foreground = false;
     if (ask_back) lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
@@ -689,6 +742,7 @@ static void enter_ask(void)
     show_console(true);
     set_bubble("ask", pending_ask.message, "pick one");
     select_choice(-1);
+    int slots = pending_ask.choice_count + (pending_ask.choice_count < 3 ? 1 : 0);
     for (uint32_t slot = 0; slot < 3; slot++) {
         const char *caption = "";
         if ((int)slot < pending_ask.choice_count) {
@@ -698,13 +752,24 @@ static void enter_ask(void)
         }
         set_dock_caption(slot, caption);
     }
+    layout_dock(slots);
     play_state("needs-attention", false);
 }
 
-/* Back only navigates: keep the question pending without sending an answer. */
+static lv_timer_t *ask_snooze;
+static void ask_snooze_cb(lv_timer_t *timer)
+{
+    ask_snooze = NULL;
+    lv_timer_delete(timer);
+    if (ask_pending && !image_pending) enter_ask();
+}
+
+/* Back only navigates: keep the question pending and resurface it in a
+ * minute — there is no asks button to reopen it manually. */
 static void dismiss_ask(void)
 {
     show_home();
+    if (!ask_snooze) ask_snooze = lv_timer_create(ask_snooze_cb, 60000, NULL);
 }
 
 static void on_ask_back(lv_event_t *event) { LV_UNUSED(event); dismiss_ask(); }
@@ -734,6 +799,10 @@ static void send_choice(int slot)
 static void on_dock(lv_event_t *event)
 {
     int slot = (int)(uintptr_t)lv_event_get_user_data(event);
+    if (image_pending) {
+        if (slot == 0) clear_image();
+        return;
+    }
     if (ask_foreground) {
         /* Single tap answers; the slot after the choices is still back. */
         if (slot < pending_ask.choice_count) {
@@ -1345,12 +1414,8 @@ void gemmi_ui_init(lv_display_t *display)
     lv_obj_set_style_border_color(store_button, lv_color_hex(0x888888), 0);
     lv_obj_add_flag(store_button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(store_button, on_shop, LV_EVENT_PRESSED, NULL);
-    lv_obj_t *bag_icon = pet_outline(store_button, 16, 6, 9, 10);
-    lv_obj_set_style_border_width(bag_icon, 0, 0);
-    static const lv_point_precise_t bag[] = {{1,3},{7,3},{8,9},{0,9},{1,3}};
-    static const lv_point_precise_t handle[] = {{2,4},{2,1},{3,0},{5,0},{6,1},{6,4}};
-    pet_path(bag_icon, bag, 5, 0x77717E);
-    pet_path(bag_icon, handle, 6, 0x77717E);
+    lv_obj_t *shop_label = pet_caption(store_button, "shop", 0, 5, 105);
+    lv_obj_set_style_text_align(shop_label, LV_TEXT_ALIGN_CENTER, 0);
     ask_back = pet_outline(screen, 12, 28, 40, 19);
     lv_obj_set_style_border_color(ask_back, lv_color_hex(0x888888), 0);
     lv_obj_add_flag(ask_back, LV_OBJ_FLAG_CLICKABLE);

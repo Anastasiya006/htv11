@@ -274,6 +274,13 @@ static void gemmi_bridge_task(void *arg)
             continue;
         }
 
+        /* An open ask or image is a blocking item: hold off consuming the
+         * next event until the human clears this one — a real queue. */
+        if (gemmi_ui_is_blocked()) {
+            just_shown = false;
+            continue;
+        }
+
         if (client == NULL && reset_client() != ESP_OK) continue;
         snprintf(url, sizeof(url), "%s/v1/device/next?device_id=%s&after=%d",
                  CONFIG_GEMMI_BRIDGE_URL, CONFIG_GEMMI_DEVICE_ID, last_shown_id);
@@ -316,19 +323,21 @@ static void gemmi_bridge_task(void *arg)
         gemmi_display_lock();
         gemmi_ui_show_event(&event);
         gemmi_display_unlock();
+        bool image_shown = false;
         if (strcmp(event.kind, "artifact") == 0) {
             gemmi_image_t img = fetch_image(event.id);
             if (img.len > 0) {
                 gemmi_display_lock();
                 gemmi_ui_show_image(img.buf, img.len);
                 gemmi_display_unlock();
+                image_shown = true;
             }
         }
         ESP_LOGI(TAG, "showing %s event %d from %s", event.kind, event.id, event.agent);
-        /* Asks stay unacked until the human answers or dismisses them so a
-         * reboot can resurface the open question. Everything else is acked
-         * once it is on screen. */
-        if (strcmp(event.kind, "ask") != 0) {
+        /* Asks and images stay unacked until the human clears them so a
+         * reboot can resurface the item. Everything else is acked once it
+         * is on screen. */
+        if (strcmp(event.kind, "ask") != 0 && !image_shown) {
             bridge_post("/v1/device/ack", event.id, NULL);
         }
     }

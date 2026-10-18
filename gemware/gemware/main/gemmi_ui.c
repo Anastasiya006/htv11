@@ -728,7 +728,7 @@ static void send_choice(int slot)
     show_console(true);
     set_bubble("answered", pending_ask.message, "done");
     show_nav_dock();
-    play_state("success", true);
+    play_state("love", true);
 }
 
 static void on_dock(lv_event_t *event)
@@ -839,6 +839,19 @@ static void on_bubble(lv_event_t *event)
     }
 }
 
+/* Press feedback: black button + blue gradient label. Button state does not
+ * propagate to the label child, so the text style is driven by hand. */
+static void on_press_style(lv_event_t *event)
+{
+    lv_obj_t *label = lv_obj_get_child(lv_event_get_target(event), 0);
+    if (!label) return;
+    if (lv_event_get_code(event) == LV_EVENT_PRESSED) {
+        lv_obj_set_style_text_color(label, lv_color_hex(0x4A8AF4), 0);
+    } else {
+        lv_obj_set_style_text_color(label, lv_color_hex(0x777777), 0);
+    }
+}
+
 static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t width, int16_t height,
                                int slot)
 {
@@ -854,11 +867,14 @@ static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t w
     /* Match the console frame with square grey outlines. */
     lv_obj_set_style_border_color(button, lv_color_hex(0x444444), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(button, lv_color_hex(0x444444), LV_STATE_CHECKED);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0xEEEEEE), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x111111), LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(button, lv_color_hex(0xEEEEEE), LV_STATE_CHECKED);
     /* Resistive touch often loses the release position, and CLICKED needs a
      * clean press+release inside the widget. PRESSED fires on touch-down. */
     lv_obj_add_event_cb(button, on_dock, LV_EVENT_PRESSED, (void *)(uintptr_t)slot);
+    lv_obj_add_event_cb(button, on_press_style, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(button, on_press_style, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(button, on_press_style, LV_EVENT_PRESS_LOST, NULL);
 
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);

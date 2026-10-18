@@ -345,6 +345,19 @@ static void set_status(const char *status)
     char caption[64];
     snprintf(caption, sizeof(caption), "%s", action);
     if (caption[0] >= 'a' && caption[0] <= 'z') caption[0] -= 'a' - 'A';
+    /* Status colour: blue for thinking/watching, amber when input is needed,
+     * green on success, purple while viewing an image, grey otherwise. */
+    uint32_t colour = 0x444444;
+    if (!strcmp(action, "Thinking") || !strncmp(action, "watching", 8) || !strcmp(action, "working")) {
+        colour = 0x3A6AE4;
+    } else if (!strcmp(action, "Needs input") || !strcmp(action, "Confirm choice") || !strcmp(action, "Disconnected")) {
+        colour = 0xB04A1E;
+    } else if (!strcmp(action, "Answered") || !strcmp(action, "Connected")) {
+        colour = 0x2E8B57;
+    } else if (!strcmp(action, "Viewing image")) {
+        colour = 0x8B3FD9;
+    }
+    lv_obj_set_style_text_color(status_label, lv_color_hex(colour), 0);
     lv_label_set_text(status_label, caption);
 }
 
@@ -1182,6 +1195,7 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
         lv_line_set_points(slice, seg, 2);
         lv_obj_set_style_line_width(slice, 1, 0);
         lv_obj_set_style_line_color(slice, lv_color_hex(0x111111), 0);
+        lv_obj_set_style_line_rounded(slice, false, 0);
         lv_obj_remove_flag(slice, LV_OBJ_FLAG_CLICKABLE);
     }
     lv_obj_set_style_text_align(pet_badge, LV_TEXT_ALIGN_RIGHT, 0);

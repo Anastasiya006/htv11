@@ -142,6 +142,12 @@ void gemmi_bridge_answer(int event_id, const char *choice)
     fflush(stdout);
 }
 
+esp_err_t gemmi_bridge_post_raw(const char *path, const char *body)
+{
+    printf("post path=%s bytes=%zu\n", path ? path : "", body ? strlen(body) : 0U);
+    return ESP_OK;
+}
+
 static void print_usage(const char *program)
 {
     printf("Usage: %s [--scene home|thinking|working|ask|artifact|agents|offline|pet|reward]\n"

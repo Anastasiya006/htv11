@@ -21,7 +21,7 @@ Use a focused window's hotkeys to switch fixture events while iterating:
 
 - `1` thinking
 - `2` working
-- `3` ask (click a choice twice to submit)
+- `3` ask (tap a choice to submit)
 - `4` artifact
 - `5` seed agent activity
 - `O` offline; `I` online
@@ -53,10 +53,10 @@ Capture the SDL renderer directly, without macOS screen-recording permission:
 
 ```sh
 ./emulator/build/gemmi-emulator --scene ask --capture /tmp/gemmi-ask.bmp
-./emulator/build/gemmi-emulator --scene ask --tap 40,299 --tap 40,299 --capture /tmp/gemmi-answer.bmp
+./emulator/build/gemmi-emulator --scene ask --tap 40,226 --capture /tmp/gemmi-answer.bmp
 ```
 
-Capture exits after rendering; up to eight `--tap x,y` points use logical 240 × 320 coordinates. The second example exercises the unchanged two-tap choice submission and prints the chosen answer.
+Capture exits after rendering; up to eight `--tap x,y` points use logical 240 × 320 coordinates. The second example selects the first visible answer and prints the chosen answer.
 
 ## Virtual pet
 

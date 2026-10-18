@@ -1,5 +1,7 @@
 #pragma once
 
+#include "esp_err.h"
+
 /* Start the background HTTP poller after Wi-Fi is connected. */
 void gemmi_bridge_start(void);
 

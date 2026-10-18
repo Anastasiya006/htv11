@@ -3,11 +3,12 @@
  *
  * The character is the only continuously animated region.  The three bottom
  * controls never move, so a human can build muscle memory even while an
- * agent changes the scene.  During an ask those same three slots become the
- * question's real choices: first tap selects, second tap sends.
+ * agent changes the scene. During an ask, a single, clearly grouped panel
+ * holds the question, its choices, and a Back action.
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_heap_caps.h"
@@ -34,6 +35,9 @@
 #define BUBBLE_H 70
 #define MAX_BUBBLE_TEXT 160
 #define AGENT_FEED_LEN 8
+/* Shows the question and two rows; further rows are deliberately below the
+ * viewport and reached with the panel's scrollbar. */
+#define ASK_PANEL_H 76
 
 /* Match the simulator's small console type without requiring a new font on
  * an already-configured firmware build. New builds enable these in defaults. */
@@ -134,7 +138,10 @@ static int agents_page;
 static bool image_pending;
 static bool draw_mode;
 static lv_obj_t *draw_pad, *draw_button;
-static lv_obj_t *choice_rows[3], *ask_back_row;
+static lv_obj_t *choice_rows[3], *ask_back_row, *ask_confirm_row;
+static lv_obj_t *choice_dots[3];
+static lv_obj_t *choice_ticks[3];
+static lv_obj_t *ask_panel, *ask_q_label;
 static lv_obj_t *status_icon;
 static void stop_monitor(void);
 static void layout_dock(int count);
@@ -146,6 +153,8 @@ static void enter_draw(void);
 static void send_choice(int slot);
 static void on_choice_row(lv_event_t *event);
 static void on_ask_back(lv_event_t *event);
+static void on_ask_confirm(lv_event_t *event);
+static void on_press_style(lv_event_t *event);
 static lv_obj_t *pet_outline(lv_obj_t *parent, int x, int y, int width, int height);
 static lv_obj_t *pet_caption(lv_obj_t *parent, const char *text, int x, int y, int width);
 
@@ -399,33 +408,37 @@ static void set_status(const char *status)
     if (!strncmp(status, "watching ", 9)) {
         const char *separator = strstr(status, " / ");
         if (separator) action = separator + 3;
-    } else if (!strcmp(status, "gemmi is thinking")) action = "Thinking";
-    else if (!strncmp(status, "answer ", 7) || !strcmp(status, "gemmi needs an answer")) action = "Needs input";
-    else if (!strncmp(status, "again to send:", 14)) action = "Confirm choice";
-    else if (!strncmp(status, "gemmi sent:", 11)) action = "Answered";
-    else if (!strncmp(status, "gemmi is viewing", 16)) action = "Viewing";
-    else if (!strncmp(status, "Agents /", 8)) action = "Agents";
-    else if (!strncmp(status, "offline", 7)) action = "Disconnected";
-    else if (!strcmp(status, "gemmi is back online")) action = "Connected";
-    else if (!strcmp(status, "gemmi checked - no asks")) action = "No pending asks";
-    else if (!strcmp(status, "gemmi found no artifact")) action = "No image yet";
-    if (!strcmp(action, "needs-attention")) action = "Needs input";
+    } else if (!strcmp(status, "gemmi is thinking")) action = "Think";
+    else if (!strncmp(status, "answer ", 7) || !strcmp(status, "gemmi needs an answer")) action = "Answer";
+    else if (!strncmp(status, "again to send:", 14)) action = "Confirm";
+    else if (!strncmp(status, "gemmi sent:", 11)) action = "Send";
+    else if (!strncmp(status, "gemmi is viewing", 16)) action = "View";
+    else if (!strncmp(status, "Agents /", 8)) action = "Manage";
+    else if (!strncmp(status, "offline", 7)) action = "Reconnect";
+    else if (!strcmp(status, "gemmi is back online")) action = "Connect";
+    else if (!strcmp(status, "gemmi checked - no asks")) action = "Check";
+    else if (!strcmp(status, "gemmi found no artifact")) action = "Browse";
+    if (!strcmp(action, "needs-attention")) action = "Answer";
+    else if (!strcmp(action, "working")) action = "Work";
+    else if (!strcmp(action, "reading")) action = "Read";
+    else if (!strcmp(action, "thinking")) action = "Think";
+    else if (!strcmp(action, "viewing")) action = "View";
+    else if (!strcmp(action, "idle")) action = "Rest";
     char caption[64];
     snprintf(caption, sizeof(caption), "%s", action);
     if (caption[0] >= 'a' && caption[0] <= 'z') caption[0] -= 'a' - 'A';
     /* Status colour follows the diamond marker: blue when working, purple
      * when input is needed or viewing, green on success, red offline. */
     uint32_t colour = 0x444444;
-    if (!strcmp(action, "Needs input") || !strcmp(action, "Confirm choice") ||
-        !strcmp(action, "Viewing")) {
+    if (!strcmp(action, "Answer") || !strcmp(action, "Confirm") ||
+        !strcmp(action, "View")) {
         colour = 0x8B3FD9;
-    } else if (!strcmp(action, "Answered") || !strcmp(action, "Connected") ||
+    } else if (!strcmp(action, "Send") || !strcmp(action, "Connect") ||
                !strcmp(action, "success")) {
         colour = 0x2E8B57;
-    } else if (!strcmp(action, "Disconnected") || !strcmp(action, "error")) {
+    } else if (!strcmp(action, "Reconnect") || !strcmp(action, "error")) {
         colour = 0xB04A1E;
-    } else if (strcmp(action, "idle") && strcmp(action, "Agents") &&
-               strncmp(action, "No ", 3) && strcmp(action, "Answering")) {
+    } else if (strcmp(action, "Rest") && strcmp(action, "Manage")) {
         /* any real activity state: working, thinking, reading, watching… */
         colour = 0x3A6AE4;
     }
@@ -705,16 +718,19 @@ static void show_home(void)
     hide_jpeg();
     if (draw_button) lv_obj_add_flag(draw_button, LV_OBJ_FLAG_HIDDEN);
     if (draw_pad) lv_obj_add_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
+    if (ask_panel) lv_obj_add_flag(ask_panel, LV_OBJ_FLAG_HIDDEN);
     for (int i = 0; i < 3; i++) {
         if (choice_rows[i]) lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
     }
     if (ask_back_row) lv_obj_add_flag(ask_back_row, LV_OBJ_FLAG_HIDDEN);
+    if (ask_confirm_row) lv_obj_add_flag(ask_confirm_row, LV_OBJ_FLAG_HIDDEN);
     ask_foreground = false;
     if (ask_back) lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
     pet_mode = 0;
     if (shop_panel) lv_obj_add_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
     agents_mode = 0;
     lv_obj_set_height(scene_obj, SCENE_H);
+    lv_obj_set_style_text_font(console_title, UI_MONO, 0);
     lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(console_title, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_pos(console_title, 20, BUBBLE_Y - 5);
@@ -832,8 +848,9 @@ static void enter_ask(void)
     if (shop_panel) lv_obj_add_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
     agents_mode = 0;
     ask_foreground = true;
-    if (pending_ask.choice_count == 3) lv_obj_remove_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
+    /* The panel always owns Back. Do not leave the legacy floating Back
+     * control visible for three-choice asks. */
+    lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(list_title, LV_OBJ_FLAG_HIDDEN);
     show_log(false);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
@@ -842,73 +859,198 @@ static void enter_ask(void)
     sprite_mode = 0;
     lv_obj_set_height(scene_obj, SCENE_H);
     apply_sprite_mode();
-    /* Choices stack as full-width rows over the lower scene — tap a row to
-     * answer, the trailing row is back. The dock stays hidden in ask mode. */
-    int rows = pending_ask.choice_count + 1;
-    const int row_h = 26, row_gap = 5;
-    int top = SCENE_H - (rows * row_h + (rows - 1) * row_gap) - 6;
-    for (int i = 0; i < pending_ask.choice_count; i++) {
-        if (!choice_rows[i]) {
-            choice_rows[i] = pet_outline(scene_obj, 12, 0, SCENE_W - 24, row_h);
-            lv_obj_set_style_border_color(choice_rows[i], lv_color_hex(0x888888), 0);
+    /* One bordered box — question on top, rows inside, back at the bottom. */
+    lv_obj_t *scr = lv_obj_get_screen(scene_obj);
+    if (!ask_panel) {
+        ask_panel = lv_obj_create(scr);
+        lv_obj_set_pos(ask_panel, 10, 26);
+        lv_obj_set_size(ask_panel, 220, 100);
+        lv_obj_set_style_bg_color(ask_panel, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_border_color(ask_panel, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_border_width(ask_panel, 1, 0);
+        lv_obj_set_style_radius(ask_panel, 0, 0);
+        lv_obj_set_style_pad_all(ask_panel, 0, 0);
+        lv_obj_set_scroll_dir(ask_panel, LV_DIR_VER);
+        lv_obj_set_scrollbar_mode(ask_panel, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_set_style_width(ask_panel, 3, LV_PART_SCROLLBAR);
+        lv_obj_set_style_bg_color(ask_panel, lv_color_hex(0x888888), LV_PART_SCROLLBAR);
+        lv_obj_set_style_bg_opa(ask_panel, LV_OPA_COVER, LV_PART_SCROLLBAR);
+        ask_q_label = lv_label_create(ask_panel);
+        lv_obj_set_pos(ask_q_label, 12, 6);
+        lv_obj_set_size(ask_q_label, 196, 60);
+        lv_label_set_long_mode(ask_q_label, LV_LABEL_LONG_DOT);
+        /* Match the normal Gemmi console: mono title, regular body copy. */
+        lv_obj_set_style_text_font(ask_q_label, UI_BODY, 0);
+        lv_obj_set_style_text_color(ask_q_label, lv_color_hex(0x444444), 0);
+        for (int i = 0; i < 3; i++) {
+            choice_rows[i] = pet_outline(ask_panel, 0, 0, 200, 24);
+            lv_obj_set_style_border_width(choice_rows[i], 0, 0);
+            lv_obj_set_style_bg_color(choice_rows[i], lv_color_hex(0xFFFFFF), 0);
+            lv_obj_set_style_bg_opa(choice_rows[i], LV_OPA_COVER, 0);
             lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_add_event_cb(choice_rows[i], on_choice_row, LV_EVENT_PRESSED,
+            lv_obj_add_event_cb(choice_rows[i], on_choice_row, LV_EVENT_CLICKED,
                                 (void *)(uintptr_t)i);
-            lv_obj_t *cap = pet_caption(choice_rows[i], "", 10, 6, SCENE_W - 44);
+            lv_obj_add_event_cb(choice_rows[i], on_press_style, LV_EVENT_PRESSED, NULL);
+            lv_obj_add_event_cb(choice_rows[i], on_press_style, LV_EVENT_RELEASED, NULL);
+            lv_obj_add_event_cb(choice_rows[i], on_press_style, LV_EVENT_PRESS_LOST, NULL);
+            lv_obj_t *cap = pet_caption(choice_rows[i], "", 26, 5, 170);
+            lv_obj_set_style_text_font(cap, UI_BODY, 0);
+            /* Keep option names on one line and let LVGL marquee a name that
+             * is wider than its row. The panel itself scrolls vertically only
+             * when there are more rows than its fixed viewport can show. */
+            lv_label_set_long_mode(cap, LV_LABEL_LONG_SCROLL);
             lv_obj_set_style_text_color(cap, lv_color_hex(0x444444), 0);
+            choice_dots[i] = lv_obj_create(choice_rows[i]);
+            lv_obj_set_pos(choice_dots[i], 8, 7);
+            lv_obj_set_size(choice_dots[i], 10, 10);
+            lv_obj_set_style_bg_opa(choice_dots[i], LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(choice_dots[i], 1, 0);
+            lv_obj_set_style_border_color(choice_dots[i], lv_color_hex(0x666666), 0);
+            lv_obj_set_style_radius(choice_dots[i], LV_RADIUS_CIRCLE, 0);
+            lv_obj_remove_flag(choice_dots[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+            /* Keep the tick above the circle as a sibling. A child of the
+             * rounded dot gets clipped by LVGL on the physical display. */
+            choice_ticks[i] = lv_line_create(choice_rows[i]);
+            static const lv_point_precise_t tick[] = {{1, 5}, {4, 8}, {9, 2}};
+            lv_line_set_points(choice_ticks[i], tick, 3);
+            lv_obj_set_pos(choice_ticks[i], 8, 6);
+            lv_obj_set_size(choice_ticks[i], 10, 10);
+            lv_obj_set_style_line_width(choice_ticks[i], 2, 0);
+            lv_obj_set_style_line_color(choice_ticks[i], lv_color_hex(0x333333), 0);
+            lv_obj_set_style_line_rounded(choice_ticks[i], true, 0);
+            lv_obj_remove_flag(choice_ticks[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_add_flag(choice_ticks[i], LV_OBJ_FLAG_HIDDEN);
         }
-        lv_obj_set_pos(choice_rows[i], 12, top + i * (row_h + row_gap));
-        lv_obj_set_size(choice_rows[i], SCENE_W - 24, row_h);
-        lv_label_set_text(lv_obj_get_child(choice_rows[i], 0), pending_ask.choices[i]);
+        /* Match the Agents view's compact dock button exactly. */
+        /* Actions deliberately live below the card, like the main Agents /
+         * Shop controls. Scrolling choices never moves the confirmation UI. */
+        ask_back_row = lv_button_create(scr);
+        lv_obj_set_pos(ask_back_row, 0, 0);
+        lv_obj_set_size(ask_back_row, 52, 24);
+        lv_obj_set_style_bg_color(ask_back_row, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_border_color(ask_back_row, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_border_width(ask_back_row, 1, 0);
+        lv_obj_set_style_pad_all(ask_back_row, 1, 0);
+        lv_obj_set_style_radius(ask_back_row, 0, 0);
+        lv_obj_set_style_shadow_width(ask_back_row, 0, 0);
+        lv_obj_set_style_border_color(ask_back_row, lv_color_hex(0x444444), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(ask_back_row, lv_color_hex(0x111111), LV_STATE_PRESSED);
+        lv_obj_add_event_cb(ask_back_row, on_ask_back, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(ask_back_row, on_press_style, LV_EVENT_PRESSED, NULL);
+        lv_obj_add_event_cb(ask_back_row, on_press_style, LV_EVENT_RELEASED, NULL);
+        lv_obj_add_event_cb(ask_back_row, on_press_style, LV_EVENT_PRESS_LOST, NULL);
+        lv_obj_t *cap = lv_label_create(ask_back_row);
+        lv_label_set_text(cap, "Back");
+        lv_label_set_long_mode(cap, LV_LABEL_LONG_CLIP);
+        lv_obj_set_style_text_color(cap, lv_color_hex(0x444444), 0);
+        lv_obj_set_style_text_font(cap, UI_MONO, 0);
+        make_label_upright(cap, 48, 14);
+        lv_obj_center(cap);
+
+        ask_confirm_row = lv_button_create(scr);
+        lv_obj_set_pos(ask_confirm_row, 0, 0);
+        lv_obj_set_size(ask_confirm_row, 82, 24);
+        lv_obj_set_style_bg_color(ask_confirm_row, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_border_color(ask_confirm_row, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_border_width(ask_confirm_row, 1, 0);
+        lv_obj_set_style_pad_all(ask_confirm_row, 1, 0);
+        lv_obj_set_style_radius(ask_confirm_row, 0, 0);
+        lv_obj_set_style_shadow_width(ask_confirm_row, 0, 0);
+        lv_obj_set_style_border_color(ask_confirm_row, lv_color_hex(0x444444), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(ask_confirm_row, lv_color_hex(0x111111), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(ask_confirm_row, lv_color_hex(0xF2F2F2), LV_STATE_DISABLED);
+        lv_obj_set_style_border_color(ask_confirm_row, lv_color_hex(0xCCCCCC), LV_STATE_DISABLED);
+        lv_obj_set_style_text_opa(ask_confirm_row, LV_OPA_60, LV_STATE_DISABLED);
+        lv_obj_add_event_cb(ask_confirm_row, on_ask_confirm, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(ask_confirm_row, on_press_style, LV_EVENT_PRESSED, NULL);
+        lv_obj_add_event_cb(ask_confirm_row, on_press_style, LV_EVENT_RELEASED, NULL);
+        lv_obj_add_event_cb(ask_confirm_row, on_press_style, LV_EVENT_PRESS_LOST, NULL);
+        cap = lv_label_create(ask_confirm_row);
+        lv_label_set_text(cap, "Confirm");
+        lv_label_set_long_mode(cap, LV_LABEL_LONG_CLIP);
+        lv_obj_set_style_text_color(cap, lv_color_hex(0x444444), 0);
+        lv_obj_set_style_text_font(cap, UI_MONO, 0);
+        make_label_upright(cap, 78, 14);
+        lv_obj_center(cap);
+    }
+    /* The compact card keeps a fixed one-line question. Long option names
+     * marquee within their own rows; they never make every row scroll. */
+    int q_h = 18;
+    lv_obj_set_size(ask_q_label, 196, q_h);
+    lv_label_set_text(ask_q_label, pending_ask.message);
+    int row_h = 22, row_gap = 3;
+    int choices_h = pending_ask.choice_count * row_h;
+    int choice_gaps = pending_ask.choice_count > 0 ? pending_ask.choice_count - 1 : 0;
+    int content_h = 4 + q_h + 2 + choices_h + choice_gaps * row_gap + 3;
+    /* The box remains the same compact two-option size. A third choice (and
+     * Back) live in the panel's vertical scroll area instead of stretching
+     * the card down the screen. */
+    int panel_h = ASK_PANEL_H;
+    /* Align the card and action dock with the main page: a 10 px gap. */
+    int panel_y = SCREEN_H - panel_h - 44;
+    lv_obj_set_size(ask_panel, 220, panel_h);
+    lv_obj_set_pos(ask_panel, 10, panel_y);
+    lv_obj_set_scrollbar_mode(ask_panel,
+                              content_h > panel_h ? LV_SCROLLBAR_MODE_ON
+                                                  : LV_SCROLLBAR_MODE_OFF);
+    /* The bubble's "Gemmi" title notched into the top border — looks like the
+     * normal box just grew taller to hold the rows. */
+    lv_label_set_text(console_title, "Gemmi");
+    lv_obj_set_pos(console_title, 20, panel_y - 5);
+    lv_obj_remove_flag(console_title, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(ask_q_label, 12, 4);
+    int top = 4 + q_h + 2;
+    for (int i = 0; i < pending_ask.choice_count; i++) {
+        lv_obj_t *caption = lv_obj_get_child(choice_rows[i], 0);
+        lv_obj_set_pos(choice_rows[i], 10, top);
+        lv_obj_set_size(choice_rows[i], 200, row_h);
+        /* 18px is tall enough for the regular body font. Keeping this text
+         * box too short makes LVGL choose a vertical marquee even for short
+         * labels. */
+        lv_obj_set_pos(caption, 26, 3);
+        lv_obj_set_size(caption, 170, 18);
+        lv_label_set_text(caption, pending_ask.choices[i]);
+        lv_obj_set_pos(choice_dots[i], 8, 6);
+        lv_obj_set_pos(choice_ticks[i], 8, 6);
         lv_obj_remove_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(choice_rows[i]);
+        top += row_h + row_gap;
     }
     for (int i = pending_ask.choice_count; i < 3; i++) {
-        if (choice_rows[i]) lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
     }
-    if (!ask_back_row) {
-        ask_back_row = pet_outline(scene_obj, 12, 0, SCENE_W - 24, row_h);
-        lv_obj_set_style_border_color(ask_back_row, lv_color_hex(0x888888), 0);
-        lv_obj_add_flag(ask_back_row, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(ask_back_row, on_ask_back, LV_EVENT_PRESSED, NULL);
-        lv_obj_t *cap = pet_caption(ask_back_row, "back", 10, 6, SCENE_W - 44);
-        lv_obj_set_style_text_color(cap, lv_color_hex(0x888888), 0);
-    }
-    lv_obj_set_pos(ask_back_row, 12, top + pending_ask.choice_count * (row_h + row_gap));
+    lv_obj_set_size(ask_back_row, 105, 24);
+    lv_obj_set_pos(ask_back_row, 12, SCREEN_H - 34);
     lv_obj_remove_flag(ask_back_row, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_size(ask_confirm_row, 105, 24);
+    lv_obj_set_pos(ask_confirm_row, 123, SCREEN_H - 34);
+    lv_obj_add_state(ask_confirm_row, LV_STATE_DISABLED);
+    lv_obj_remove_flag(ask_confirm_row, LV_OBJ_FLAG_HIDDEN);
+    selected_choice = -1;
+    for (int i = 0; i < pending_ask.choice_count; i++) {
+        lv_obj_set_style_bg_color(choice_rows[i], lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_border_width(choice_rows[i], 0, 0);
+        lv_obj_set_style_bg_color(choice_dots[i], lv_color_hex(0xFFFFFF), 0);
+        lv_obj_add_flag(choice_ticks[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_set_style_bg_color(ask_confirm_row, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(ask_confirm_row, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(ask_confirm_row, 0), lv_color_hex(0x999999), 0);
+    lv_obj_scroll_to_y(ask_panel, 0, LV_ANIM_OFF);
+    lv_obj_remove_flag(ask_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(ask_panel);
     lv_obj_move_foreground(ask_back_row);
+    lv_obj_move_foreground(ask_confirm_row);
+    /* The opaque label must be above the frame: it erases a short run of the
+     * top border so GEMMI reads as a proper notched caption. */
+    lv_obj_move_foreground(console_title);
+    lv_obj_add_flag(bubble_obj, LV_OBJ_FLAG_HIDDEN);
     set_dock_caption(0, "");
     set_dock_caption(1, "");
     set_dock_caption(2, "");
-    lv_point_t question_size;
-    lv_text_get_size(&question_size, pending_ask.message, UI_BODY, 0, 4,
-                     BUBBLE_W - 20, LV_TEXT_FLAG_NONE);
-    int question_height = question_size.y + 34;
-    if (question_height < BUBBLE_H) question_height = BUBBLE_H;
-    if (question_height > 126) question_height = 126;
-    int question_y = 276 - question_height;
-    lv_obj_set_pos(bubble_obj, BUBBLE_X, question_y);
-    lv_obj_set_size(bubble_obj, BUBBLE_W, question_height);
-    lv_obj_set_size(message_label, BUBBLE_W - 20, question_height - 28);
-    lv_obj_set_pos(console_title, 20, question_y - 5);
-    lv_obj_remove_flag(console_title, LV_OBJ_FLAG_HIDDEN);
     char status[80];
     snprintf(status, sizeof(status), "answer %s", pending_ask.agent);
     set_status(status);
-    show_console(true);
-    set_bubble("ask", pending_ask.message, "pick one");
     select_choice(-1);
-    int slots = pending_ask.choice_count + (pending_ask.choice_count < 3 ? 1 : 0);
-    for (uint32_t slot = 0; slot < 3; slot++) {
-        const char *caption = "";
-        if ((int)slot < pending_ask.choice_count) {
-            caption = pending_ask.choices[slot];
-        } else if (pending_ask.choice_count < 3 && (int)slot == pending_ask.choice_count) {
-            caption = "back";
-        }
-        set_dock_caption(slot, caption);
-    }
-    layout_dock(slots);
     play_state("needs-attention", false);
 }
 
@@ -928,16 +1070,37 @@ static void dismiss_ask(void)
         if (choice_rows[i]) lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
     }
     if (ask_back_row) lv_obj_add_flag(ask_back_row, LV_OBJ_FLAG_HIDDEN);
+    if (ask_confirm_row) lv_obj_add_flag(ask_confirm_row, LV_OBJ_FLAG_HIDDEN);
     show_home();
     if (!ask_snooze) ask_snooze = lv_timer_create(ask_snooze_cb, 60000, NULL);
 }
 
 static void on_ask_back(lv_event_t *event) { LV_UNUSED(event); dismiss_ask(); }
 
-/* Row-by-row ask choices: one tap sends the answer. */
+/* A row selects an answer. Sending always requires the separate confirm tap. */
 static void on_choice_row(lv_event_t *event)
 {
-    send_choice((int)(uintptr_t)lv_event_get_user_data(event));
+    selected_choice = (int)(uintptr_t)lv_event_get_user_data(event);
+    for (int i = 0; i < pending_ask.choice_count; i++) {
+        bool selected = i == selected_choice;
+        lv_obj_set_style_bg_color(choice_rows[i], lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_border_width(choice_rows[i], 0, 0);
+        if (selected) lv_obj_remove_flag(choice_ticks[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(choice_ticks[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_remove_state(ask_confirm_row, LV_STATE_DISABLED);
+    lv_obj_set_style_bg_color(ask_confirm_row, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(ask_confirm_row, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(ask_confirm_row, 0), lv_color_hex(0x444444), 0);
+    set_status("confirm choice");
+}
+
+static void on_ask_confirm(lv_event_t *event)
+{
+    LV_UNUSED(event);
+    if (selected_choice >= 0 && selected_choice < pending_ask.choice_count) {
+        send_choice(selected_choice);
+    }
 }
 
 static void send_choice(int slot)
@@ -947,6 +1110,12 @@ static void send_choice(int slot)
     ask_pending = false;
     ask_foreground = false;
     lv_obj_add_flag(ask_back, LV_OBJ_FLAG_HIDDEN);
+    if (ask_panel) lv_obj_add_flag(ask_panel, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < 3; i++) {
+        if (choice_rows[i]) lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (ask_back_row) lv_obj_add_flag(ask_back_row, LV_OBJ_FLAG_HIDDEN);
+    if (ask_confirm_row) lv_obj_add_flag(ask_confirm_row, LV_OBJ_FLAG_HIDDEN);
     set_sprite_home();
     lv_obj_set_height(scene_obj, SCENE_H);
     lv_obj_set_pos(bubble_obj, BUBBLE_X, BUBBLE_Y);
@@ -1233,11 +1402,10 @@ static void on_press_style(lv_event_t *event)
 {
     lv_obj_t *label = lv_obj_get_child(lv_event_get_target(event), 0);
     if (!label) return;
-    if (lv_event_get_code(event) == LV_EVENT_PRESSED) {
-        lv_obj_set_style_text_color(label, lv_color_hex(0x444444), 0);
-    } else {
-        lv_obj_set_style_text_color(label, lv_color_hex(0x444444), 0);
-    }
+    lv_obj_set_style_text_color(label,
+                                lv_color_hex(lv_event_get_code(event) == LV_EVENT_PRESSED
+                                                 ? 0x4A8AF4 : 0x444444),
+                                0);
 }
 
 static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t width, int16_t height,

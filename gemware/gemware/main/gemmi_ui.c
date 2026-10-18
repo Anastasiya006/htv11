@@ -373,7 +373,7 @@ static void select_choice(int slot)
             lv_obj_set_style_text_color(dock_labels[index], lv_color_hex(0x444444), 0);
         } else {
             lv_obj_remove_state(dock_buttons[index], LV_STATE_CHECKED);
-            lv_obj_set_style_text_color(dock_labels[index], lv_color_hex(0x111111), 0);
+            lv_obj_set_style_text_color(dock_labels[index], lv_color_hex(0x444444), 0);
         }
     }
 }
@@ -505,7 +505,7 @@ static void show_agent_detail(void)
         int idx = (entry->log_head - shown + row + AGENT_LOG_LEN) % AGENT_LOG_LEN;
         const char *line = entry->log[idx];
         /* Line-type colours: thinking in blue, tool calls dim, rest dark. */
-        const char *colour = "#222222";
+        const char *colour = "#444444";
         if (!strncmp(line, "think", 5) || !strncmp(line, "cot", 3)) {
             colour = "#1E6FA8";
         } else if (!strncmp(line, "tool", 4) || !strncmp(line, "ran", 3)) {
@@ -848,7 +848,7 @@ static void on_press_style(lv_event_t *event)
     if (lv_event_get_code(event) == LV_EVENT_PRESSED) {
         lv_obj_set_style_text_color(label, lv_color_hex(0x4A8AF4), 0);
     } else {
-        lv_obj_set_style_text_color(label, lv_color_hex(0x777777), 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(0x444444), 0);
     }
 }
 
@@ -878,7 +878,7 @@ static lv_obj_t *create_button(lv_obj_t *parent, int16_t x, int16_t y, int16_t w
 
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_color(label, lv_color_hex(0x777777), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(0x444444), 0);
     lv_obj_set_style_text_font(label, UI_MONO, 0);
     make_label_upright(label, width - 4, 14);
     lv_obj_center(label);

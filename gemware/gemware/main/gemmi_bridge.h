@@ -11,3 +11,5 @@ void gemmi_bridge_answer(int event_id, const char *choice);
 
 /* POST a fully-assembled JSON body (e.g. a device-drawn doodle). */
 esp_err_t gemmi_bridge_post_raw(const char *path, const char *body);
+/* Chunked doodle POST — streams the packed RGB565 buffer without a giant body. */
+esp_err_t gemmi_bridge_post_drawing(const char *agent, const uint8_t *buf, size_t len);

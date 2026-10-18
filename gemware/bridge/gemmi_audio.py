@@ -159,15 +159,63 @@ def gemini_speech(text: str, *, model: str = DEFAULT_MODEL, voice: str = "Puck")
     return validate_wav(output.getvalue())
 
 
+# Laptop audio players, in preference order. Each builds an argv to play a WAV
+# file at a volume in 0..1 on the operating system's current default output.
+# afplay comes first so macOS behavior is unchanged; the rest cover Linux.
+def _afplay(exe: str, path: Path, volume: float) -> list[str]:
+    return [exe, "-v", f"{volume:.3f}", str(path)]
+
+
+def _paplay(exe: str, path: Path, volume: float) -> list[str]:
+    return [exe, f"--volume={round(volume * 65536)}", str(path)]
+
+
+def _pw_play(exe: str, path: Path, volume: float) -> list[str]:
+    return [exe, f"--volume={volume:.3f}", str(path)]
+
+
+def _ffplay(exe: str, path: Path, volume: float) -> list[str]:
+    return [exe, "-nodisp", "-autoexit", "-loglevel", "quiet",
+            "-volume", str(round(volume * 100)), str(path)]
+
+
+def _sox_play(exe: str, path: Path, volume: float) -> list[str]:
+    return [exe, "-q", "-V1", str(path), "vol", f"{volume:.3f}"]
+
+
+def _aplay(exe: str, path: Path, volume: float) -> list[str]:
+    return [exe, "-q", str(path)]  # ALSA plays at the system mixer volume
+
+
+PLAYERS = (
+    ("afplay", "macOS default output", _afplay),
+    ("paplay", "PulseAudio default output", _paplay),
+    ("pw-play", "PipeWire default output", _pw_play),
+    ("ffplay", "ffmpeg default output", _ffplay),
+    ("play", "SoX default output", _sox_play),
+    ("aplay", "ALSA default output", _aplay),
+)
+
+
+def detect_player() -> tuple[str, str, Callable[[str, Path, float], list[str]]] | None:
+    """Pick the first available system audio player, or None if none exist."""
+    for name, output, builder in PLAYERS:
+        executable = shutil.which(name)
+        if executable:
+            return executable, output, builder
+    return None
+
+
 class AudioService:
     def __init__(self, mode: str, *, volume: float = 0.6, model: str = DEFAULT_MODEL,
                  voice: str = "Puck", effect: str = "none", player: Callable[[Path], None] | None = None,
                  synthesizer: Callable[[str], bytes] | None = None) -> None:
         if mode not in ("chimes", "speech") or not 0 <= volume <= 1:
             raise ValueError("Invalid audio settings")
-        executable = shutil.which("afplay")
-        if player is None and executable is None:
-            raise ValueError("Bridge audio currently requires macOS afplay")
+        detected = detect_player()
+        if player is None and detected is None:
+            raise ValueError("Bridge audio requires a system audio player: macOS afplay, "
+                             "or Linux paplay, pw-play, ffplay, play, or aplay")
         if mode == "speech" and synthesizer is None and not os.environ.get("GEMINI_API_KEY"):
             raise ValueError("Set GEMINI_API_KEY before enabling speech, or use --audio chimes")
         if effect not in ("none", "piano", "chiptune"):
@@ -175,7 +223,10 @@ class AudioService:
         if effect != "none" and importlib.util.find_spec("numpy") is None:
             raise ValueError("Musical voice effects require NumPy: python3 -m pip install numpy")
         self.mode, self.voice, self.effect = mode, voice, effect
-        self.executable, self.volume = executable, volume
+        self.executable = detected[0] if detected else None
+        self.output = detected[1] if detected else "custom output"
+        self._build_command = detected[2] if detected else None
+        self.volume = volume
         self.player = player or self._play_file
         self.synthesizer = synthesizer or (lambda text: gemini_speech(text, model=model, voice=voice))
         self.jobs: queue.PriorityQueue = queue.PriorityQueue(maxsize=8)
@@ -226,11 +277,11 @@ class AudioService:
 
     def status(self) -> dict:
         with self.lock:
-            return {"mode": self.mode, "voice": self.voice, "effect": self.effect, "output": "macOS default output", "queued": self.jobs.qsize(),
+            return {"mode": self.mode, "voice": self.voice, "effect": self.effect, "output": self.output, "queued": self.jobs.qsize(),
                     "played": self.played, "dropped": self.dropped, "last_error": self.last_error}
 
     def _play_file(self, path: Path) -> None:
-        with subprocess.Popen([self.executable, "-v", str(self.volume), str(path)],
+        with subprocess.Popen(self._build_command(self.executable, path, self.volume),
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as process:
             deadline = time.monotonic() + 35
             while process.poll() is None:
@@ -285,7 +336,7 @@ class AudioService:
                         self.last_error = error
             except Exception:
                 with self.lock:
-                    self.last_error = "Audio playback failed; check macOS sound output"
+                    self.last_error = "Audio playback failed; check your system sound output"
             finally:
                 self.jobs.task_done()
 

@@ -376,8 +376,9 @@ esp_err_t gemmi_bridge_post_raw(const char *path, const char *body)
     esp_http_client_set_post_field(client, body, (int)strlen(body));
     esp_err_t error = esp_http_client_perform(client);
     int status = esp_http_client_get_status_code(client);
-    if (error != ESP_OK && reset_client() == ESP_OK) {
-        /* dead keep-alive — retry once on a fresh socket */
+    for (int attempt = 0; attempt < 3 && error != ESP_OK; attempt++) {
+        if (reset_client() != ESP_OK) break;
+        /* dead socket or transient connect failure — retry on a fresh client */
         esp_http_client_set_url(client, url);
         esp_http_client_set_method(client, HTTP_METHOD_POST);
         esp_http_client_set_header(client, "Content-Type", "application/json");
@@ -385,12 +386,91 @@ esp_err_t gemmi_bridge_post_raw(const char *path, const char *body)
         esp_http_client_set_post_field(client, body, (int)strlen(body));
         error = esp_http_client_perform(client);
         status = esp_http_client_get_status_code(client);
+        if (error != ESP_OK) vTaskDelay(pdMS_TO_TICKS(400));
     }
     if (error != ESP_OK || (status != 200 && status != 201)) {
         ESP_LOGW(TAG, "post_raw %s failed: err=%s status=%d", path,
                  esp_err_to_name(error), status);
     }
     return (error == ESP_OK && (status == 200 || status == 201)) ? ESP_OK : ESP_FAIL;
+}
+
+/* Chunked doodle POST — writes the JSON skeleton + base64 in small pieces so
+ * no ~11KB contiguous body is needed (which fragments TLS allocations). */
+esp_err_t gemmi_bridge_post_drawing(const char *agent, const uint8_t *buf, size_t len)
+{
+    if (client == NULL && reset_client() != ESP_OK) return ESP_FAIL;
+    char url[192];
+    snprintf(url, sizeof(url), "%s/v1/drawing", CONFIG_GEMMI_BRIDGE_URL);
+    esp_http_client_set_url(client, url);
+    esp_http_client_set_method(client, HTTP_METHOD_POST);
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_user_data(client, NULL);
+
+    static const char b64_tab[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    char head[80];
+    int head_len = snprintf(head, sizeof(head), "{\"agent\":\"%s\",\"image_b64\":\"", agent);
+    int total = head_len + (int)((len + 2) / 3) * 4 + 2;
+
+    esp_err_t error = esp_http_client_open(client, total);
+    int status = 0;
+    if (error == ESP_OK) {
+        if (esp_http_client_write(client, head, head_len) < 0) error = ESP_FAIL;
+        static char chunk[2048];
+        for (size_t off = 0; error == ESP_OK && off < len; off += 1500) {
+            size_t part = len - off < 1500 ? len - off : 1500;
+            size_t o = 0;
+            for (size_t i = 0; i < part; i += 3) {
+                uint32_t v = (uint32_t)buf[off + i] << 16
+                           | (uint32_t)(i + 1 < part ? buf[off + i + 1] : 0) << 8
+                           | (uint32_t)(i + 2 < part ? buf[off + i + 2] : 0);
+                chunk[o++] = b64_tab[(v >> 18) & 63];
+                chunk[o++] = b64_tab[(v >> 12) & 63];
+                chunk[o++] = (i + 1 < part) ? b64_tab[(v >> 6) & 63] : '=';
+                chunk[o++] = (i + 2 < part) ? b64_tab[v & 63] : '=';
+            }
+            if (esp_http_client_write(client, chunk, (int)o) < 0) error = ESP_FAIL;
+        }
+        if (error == ESP_OK && esp_http_client_write(client, "\"}", 2) < 0) error = ESP_FAIL;
+        status = esp_http_client_get_status_code(client);
+        esp_http_client_close(client);
+    }
+    if (error != ESP_OK && reset_client() == ESP_OK) {
+        /* one retry on a fresh client — transient socket or heap hiccup */
+        esp_http_client_set_url(client, url);
+        esp_http_client_set_method(client, HTTP_METHOD_POST);
+        esp_http_client_set_header(client, "Content-Type", "application/json");
+        esp_http_client_set_user_data(client, NULL);
+        error = esp_http_client_open(client, total);
+        if (error == ESP_OK) {
+            esp_http_client_write(client, head, head_len);
+            static char chunk[2048];
+            for (size_t off = 0; error == ESP_OK && off < len; off += 1500) {
+                size_t part = len - off < 1500 ? len - off : 1500;
+                size_t o = 0;
+                for (size_t i = 0; i < part; i += 3) {
+                    uint32_t v = (uint32_t)buf[off + i] << 16
+                               | (uint32_t)(i + 1 < part ? buf[off + i + 1] : 0) << 8
+                               | (uint32_t)(i + 2 < part ? buf[off + i + 2] : 0);
+                    chunk[o++] = b64_tab[(v >> 18) & 63];
+                    chunk[o++] = b64_tab[(v >> 12) & 63];
+                    chunk[o++] = (i + 1 < part) ? b64_tab[(v >> 6) & 63] : '=';
+                    chunk[o++] = (i + 2 < part) ? b64_tab[v & 63] : '=';
+                }
+                if (esp_http_client_write(client, chunk, (int)o) < 0) error = ESP_FAIL;
+            }
+            if (error == ESP_OK) esp_http_client_write(client, "\"}", 2);
+            status = esp_http_client_get_status_code(client);
+            esp_http_client_close(client);
+        }
+    }
+    if (error != ESP_OK || (status != 200 && status != 201)) {
+        ESP_LOGW(TAG, "doodle POST failed: err=%s status=%d",
+                 esp_err_to_name(error), status);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
 }
 
 void gemmi_bridge_start(void)

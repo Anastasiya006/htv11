@@ -444,7 +444,8 @@ def serve(args: argparse.Namespace) -> int:
     except ValueError as error:
         server.server_close()
         raise SystemExit(str(error)) from None
-    print(f"Audio: {args.audio} (uses macOS selected sound output)")
+    output = BridgeHandler.audio.output if BridgeHandler.audio else "system default output"
+    print(f"Audio: {args.audio} (uses {output})")
     print(f"Gemmi bridge listening on http://{args.host}:{args.port}")
     print(f"Event store: {BridgeHandler.store.path}")
     print(f"Bridge token gate: {'enabled' if BridgeHandler.token else 'disabled (localhost only)'}")

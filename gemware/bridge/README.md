@@ -98,10 +98,11 @@ hardware protections are deliberately enabled.
 
 ## Laptop / Bluetooth speaker audio
 
-Pair the JBL Go 3 with the **Mac**, then select it under **System Settings →
-Sound → Output**. The server uses the Mac's current default output; the ESP32
-needs no Bluetooth audio code or additional speaker hardware. This output
-selection applies to other Mac applications too.
+Pair the JBL Go 3 with the laptop, then select it as the default output
+(macOS: **System Settings → Sound → Output**; Linux: your desktop sound
+settings or `pavucontrol`). The server plays through the operating system's
+current default output; the ESP32 needs no Bluetooth audio code or additional
+speaker hardware. This output selection applies to other applications too.
 
 Start the bridge with local notification sounds (no API key or packages):
 
@@ -139,9 +140,12 @@ commit it. Audio files are temporary and removed after playback. If synthesis
 fails, a local chime plays instead. No API key is needed in chime mode.
 
 Options: `--audio off` (default), `--audio-volume 0.6` (range 0–1),
-`--speech-model gemini-3.8-flash-tts`, and `--voice Puck`. Audio playback currently
-supports macOS via `afplay`; changing the default sound output redirects the
-next playback. If Bluetooth disconnects, macOS may route audio to the laptop.
+`--speech-model gemini-3.8-flash-tts`, and `--voice Puck`. Audio playback uses
+the first available system player: macOS `afplay`, or on Linux `paplay`,
+`pw-play`, `ffplay`, `play` (SoX), or `aplay` (install one, e.g.
+`pulseaudio-utils` or `pipewire-utils`). `aplay` ignores `--audio-volume` and
+plays at the system mixer level. Changing the default sound output redirects
+the next playback. If Bluetooth disconnects, the OS may route audio to the laptop.
 Stop the server with Ctrl+C to stop local audio.
 
 `GET /health` includes audio mode, queue length, successful playback count,

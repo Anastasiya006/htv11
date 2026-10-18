@@ -41,7 +41,11 @@
 #include "gemmi_ui_scale.h"
 #endif
 
-#define SHOP_ASSET(sym, width, height) { .header.magic = LV_IMAGE_HEADER_MAGIC, .header.cf = LV_COLOR_FORMAT_RAW, .header.w = width, .header.h = height, .data_size = sizeof(sym), .data = sym }
+/* Pre-decoded ARGB8888 pixels in flash (see gemware/tools/png_to_lvgl.py).
+ * The device has no PSRAM and keeps LV_CACHE_DEF_SIZE at 0, so decoding PNGs
+ * at draw time allocated from a heap the GIF kept fragmenting; the re-decode
+ * eventually failed and the sprite vanished. Native pixels never decode. */
+#define SHOP_ASSET(sym, width, height) { .header.magic = LV_IMAGE_HEADER_MAGIC, .header.cf = LV_COLOR_FORMAT_ARGB8888, .header.w = width, .header.h = height, .header.stride = (width) * 4, .data_size = sizeof(sym), .data = sym }
 static const lv_image_dsc_t halloween_shop_pngs[8] = {
     SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_witch_hat_png, 32, 32),
     SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_pumpkin_beanie_png, 32, 32),
@@ -1264,25 +1268,7 @@ static int last_bx, last_by; /* last rasterised point, for line segments */
 /* Packed image: 4-byte w/h header + 72x54 RGB565 (same 4:3 as the pad). */
 static uint8_t draw_buf[4 + 72 * 54 * 2];
 /* The JSON body is malloc'd only while sending — TLS needs the heap. */
-static char *draw_json;
-
-static const char b64_table[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-static size_t b64_encode(const uint8_t *in, size_t len, char *out)
-{
-    size_t o = 0;
-    for (size_t i = 0; i < len; i += 3) {
-        uint32_t v = (uint32_t)in[i] << 16
-                   | (uint32_t)(i + 1 < len ? in[i + 1] : 0) << 8
-                   | (uint32_t)(i + 2 < len ? in[i + 2] : 0);
-        out[o++] = b64_table[(v >> 18) & 63];
-        out[o++] = b64_table[(v >> 12) & 63];
-        out[o++] = (i + 1 < len) ? b64_table[(v >> 6) & 63] : '=';
-        out[o++] = (i + 2 < len) ? b64_table[v & 63] : '=';
-    }
-    out[o] = 0;
-    return o;
-}
+static char *draw_json __attribute__((unused));
 
 static void exit_draw(void)
 {
@@ -1305,20 +1291,9 @@ static void clear_drawing(void)
 
 static void send_drawing(void)
 {
-    draw_json = malloc(11000);
-    esp_err_t sent = ESP_FAIL;
-    if (draw_json) {
-        const char *who = detail_agent >= 0 && detail_agent < agent_feed_count
-                          ? agent_feed[detail_agent].agent : "agent";
-        int head = snprintf(draw_json, 11000, "{\"agent\":\"%s\",\"image_b64\":\"", who);
-        size_t b64_len = b64_encode(draw_buf, sizeof(draw_buf), draw_json + head);
-        snprintf(draw_json + head + b64_len, 11000 - head - b64_len, "\"}");
-        sent = gemmi_bridge_post_raw("/v1/drawing", draw_json);
-        free(draw_json);
-        draw_json = NULL;
-    } else {
-        ESP_LOGW("draw", "json malloc failed — heap too fragmented");
-    }
+    const char *who = detail_agent >= 0 && detail_agent < agent_feed_count
+                      ? agent_feed[detail_agent].agent : "agent";
+    esp_err_t sent = gemmi_bridge_post_drawing(who, draw_buf, sizeof(draw_buf));
     if (sent != ESP_OK) {
         /* A network hiccup or fragmented heap should not discard a human's
          * picture. Keep the canvas and Send action available for retry. */

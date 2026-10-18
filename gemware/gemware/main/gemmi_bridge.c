@@ -433,7 +433,12 @@ esp_err_t gemmi_bridge_post_drawing(const char *agent, const uint8_t *buf, size_
             if (esp_http_client_write(client, chunk, (int)o) < 0) error = ESP_FAIL;
         }
         if (error == ESP_OK && esp_http_client_write(client, "\"}", 2) < 0) error = ESP_FAIL;
-        status = esp_http_client_get_status_code(client);
+        if (error == ESP_OK) {
+            /* Pull the response headers before status — without this the
+             * client closes with the server's response unread (BrokenPipe). */
+            esp_http_client_fetch_headers(client);
+            status = esp_http_client_get_status_code(client);
+        }
         esp_http_client_close(client);
     }
     if (error != ESP_OK && reset_client() == ESP_OK) {
@@ -461,7 +466,10 @@ esp_err_t gemmi_bridge_post_drawing(const char *agent, const uint8_t *buf, size_
                 if (esp_http_client_write(client, chunk, (int)o) < 0) error = ESP_FAIL;
             }
             if (error == ESP_OK) esp_http_client_write(client, "\"}", 2);
-            status = esp_http_client_get_status_code(client);
+            if (error == ESP_OK) {
+                esp_http_client_fetch_headers(client);
+                status = esp_http_client_get_status_code(client);
+            }
             esp_http_client_close(client);
         }
     }

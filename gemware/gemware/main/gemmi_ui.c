@@ -551,6 +551,13 @@ static void show_nav_dock(void)
 /* An artifact image stays on screen until the human taps okay — same
  * blocking-queue behaviour as an unanswered ask. */
 bool gemmi_ui_is_blocked(void) { return ask_foreground || image_pending || draw_mode; }
+const char *gemmi_ui_block_reason(void)
+{
+    if (ask_foreground) return "ask";
+    if (image_pending) return "image";
+    if (draw_mode) return "draw";
+    return "none";
+}
 
 static void clear_image(void)
 {
@@ -1453,7 +1460,7 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     gem_dsc.data = (const uint8_t *)gem_px;
     gem_dsc.data_size = sizeof(gem_px);
     lv_obj_t *gems_icon = lv_image_create(screen);
-    lv_obj_set_pos(gems_icon, 214, 10);
+    lv_obj_set_pos(gems_icon, 214, 7);
     lv_image_set_src(gems_icon, &gem_dsc);
     lv_obj_set_style_text_align(pet_badge, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(pet_badge, LV_LABEL_LONG_DOT);

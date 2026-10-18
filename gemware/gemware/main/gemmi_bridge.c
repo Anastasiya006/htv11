@@ -33,6 +33,7 @@ typedef struct {
 
 static QueueHandle_t device_msg_queue;
 static int last_shown_id;
+static int blocked_iters;
 
 typedef struct { uint8_t *buf; size_t len; } gemmi_image_t;
 
@@ -278,8 +279,14 @@ static void gemmi_bridge_task(void *arg)
          * next event until the human clears this one — a real queue. */
         if (gemmi_ui_is_blocked()) {
             just_shown = false;
+            if (++blocked_iters >= 15) {
+                ESP_LOGW(TAG, "poll blocked ~%ds on %s — queue held",
+                         blocked_iters * 2, gemmi_ui_block_reason());
+                blocked_iters = 0;
+            }
             continue;
         }
+        blocked_iters = 0;
 
         if (client == NULL && reset_client() != ESP_OK) continue;
         snprintf(url, sizeof(url), "%s/v1/device/next?device_id=%s&after=%d",

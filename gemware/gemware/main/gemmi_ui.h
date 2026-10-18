@@ -24,6 +24,8 @@ void gemmi_ui_show_image(uint8_t *data, size_t len);
 /* True while an ask or image is foregrounded and waits on the human — the
  * poll task holds off consuming the next event so they act as a queue. */
 bool gemmi_ui_is_blocked(void);
+/* Which blocking item is foregrounded — for the stall watchdog. */
+const char *gemmi_ui_block_reason(void);
 
 /* Show or clear the "offline" status line when the bridge is unreachable. */
 void gemmi_ui_offline(bool offline);

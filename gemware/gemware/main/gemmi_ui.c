@@ -905,10 +905,11 @@ static void send_choice(int slot)
 static lv_obj_t *stroke_objs[DRAW_STROKES];
 static lv_point_precise_t stroke_pts[DRAW_STROKES][DRAW_PTS];
 static int stroke_count, stroke_len;
-/* Packed image: 4-byte w/h header + 96x72 RGB565 — same format artifacts use. */
-static uint8_t draw_buf[4 + 96 * 72 * 2];
-static char draw_b64[19000];
-static char draw_json[19900];
+static int last_bx, last_by; /* last rasterised point, for line segments */
+/* Packed image: 4-byte w/h header + 72x54 RGB565 (same 4:3 as the pad). */
+static uint8_t draw_buf[4 + 72 * 54 * 2];
+/* The JSON body is malloc'd only while sending — TLS needs the heap. */
+static char *draw_json;
 
 static const char b64_table[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -937,12 +938,20 @@ static void exit_draw(void)
 
 static void send_drawing(void)
 {
-    b64_encode(draw_buf, sizeof(draw_buf), draw_b64);
-    const char *who = detail_agent >= 0 && detail_agent < agent_feed_count
-                      ? agent_feed[detail_agent].agent : "agent";
-    snprintf(draw_json, sizeof(draw_json),
-             "{\"agent\":\"%s\",\"image_b64\":\"%s\"}", who, draw_b64);
-    esp_err_t sent = gemmi_bridge_post_raw("/v1/drawing", draw_json);
+    draw_json = malloc(11000);
+    esp_err_t sent = ESP_FAIL;
+    if (draw_json) {
+        const char *who = detail_agent >= 0 && detail_agent < agent_feed_count
+                          ? agent_feed[detail_agent].agent : "agent";
+        int head = snprintf(draw_json, 11000, "{\"agent\":\"%s\",\"image_b64\":\"", who);
+        size_t b64_len = b64_encode(draw_buf, sizeof(draw_buf), draw_json + head);
+        snprintf(draw_json + head + b64_len, 11000 - head - b64_len, "\"}");
+        sent = gemmi_bridge_post_raw("/v1/drawing", draw_json);
+        free(draw_json);
+        draw_json = NULL;
+    } else {
+        ESP_LOGW("draw", "json malloc failed — heap too fragmented");
+    }
     draw_mode = false;
     if (draw_pad) lv_obj_add_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
     show_home();
@@ -960,6 +969,7 @@ static void on_draw_pad(lv_event_t *event)
     int px = p.x - area.x1, py = p.y - area.y1;
     if (px < 0 || py < 0 || px >= 216 || py >= 162) return;
     lv_event_code_t code = lv_event_get_code(event);
+    ESP_LOGI("draw", "pad event %d at %d,%d strokes=%d", (int)code, px, py, stroke_count);
     if (code == LV_EVENT_PRESSED && stroke_len > 0) {
         stroke_count++; /* fresh stroke on lift+press */
         stroke_len = 0;
@@ -973,12 +983,27 @@ static void on_draw_pad(lv_event_t *event)
         lv_obj_remove_flag(stroke_objs[stroke_count], LV_OBJ_FLAG_CLICKABLE);
     }
     stroke_pts[stroke_count][stroke_len++] = (lv_point_precise_t){px, py};
-    int bx = px * 96 / 216, by = py * 72 / 162;
-    for (int dy = 0; dy < 2; dy++)
-        for (int dx = 0; dx < 2; dx++) {
-            int X = bx + dx, Y = by + dy;
-            if (X < 96 && Y < 72) *(uint16_t *)(draw_buf + 4 + (Y * 96 + X) * 2) = 0x1800;
-        }
+    /* enter_draw hides every stroke — reveal it again on first reuse. */
+    lv_obj_remove_flag(stroke_objs[stroke_count], LV_OBJ_FLAG_HIDDEN);
+    int bx = px * 72 / 216, by = py * 54 / 162;
+    /* Rasterise the SEGMENT from the last point so fast drags don't leave
+     * dotted lines in the sent image. */
+    int x0 = (code == LV_EVENT_PRESSED || stroke_len == 1) ? bx : last_bx;
+    int y0 = (code == LV_EVENT_PRESSED || stroke_len == 1) ? by : last_by;
+    int dx_ = bx > x0 ? bx - x0 : x0 - bx;
+    int dy_ = by > y0 ? by - y0 : y0 - by;
+    int steps = dx_ > dy_ ? dx_ : dy_;
+    for (int s = 0; s <= steps; s++) {
+        int X = x0 + (steps ? (bx - x0) * s / steps : 0);
+        int Y = y0 + (steps ? (by - y0) * s / steps : 0);
+        for (int dy2 = 0; dy2 < 2; dy2++)
+            for (int dx2 = 0; dx2 < 2; dx2++) {
+                int xx = X + dx2, yy = Y + dy2;
+                if (xx >= 0 && yy >= 0 && xx < 72 && yy < 54)
+                    *(uint16_t *)(draw_buf + 4 + (yy * 72 + xx) * 2) = 0x1800;
+            }
+    }
+    last_bx = bx; last_by = by;
     lv_line_set_points(stroke_objs[stroke_count], stroke_pts[stroke_count], stroke_len);
 }
 
@@ -991,7 +1016,7 @@ static void enter_draw(void)
     show_log(false);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
     memset(draw_buf, 0xFF, sizeof(draw_buf));
-    draw_buf[0] = 96; draw_buf[1] = 0; draw_buf[2] = 72; draw_buf[3] = 0;
+    draw_buf[0] = 72; draw_buf[1] = 0; draw_buf[2] = 54; draw_buf[3] = 0;
     stroke_count = stroke_len = 0;
     if (!draw_pad) {
         draw_pad = lv_obj_create(scene_obj);

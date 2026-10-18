@@ -356,6 +356,19 @@ esp_err_t gemmi_bridge_post_raw(const char *path, const char *body)
     esp_http_client_set_post_field(client, body, (int)strlen(body));
     esp_err_t error = esp_http_client_perform(client);
     int status = esp_http_client_get_status_code(client);
+    if (error != ESP_OK && reset_client() == ESP_OK) {
+        /* dead keep-alive — retry once on a fresh socket */
+        esp_http_client_set_url(client, url);
+        esp_http_client_set_method(client, HTTP_METHOD_POST);
+        esp_http_client_set_header(client, "Content-Type", "application/json");
+        esp_http_client_set_user_data(client, NULL);
+        esp_http_client_set_post_field(client, body, (int)strlen(body));
+        error = esp_http_client_perform(client);
+        status = esp_http_client_get_status_code(client);
+    }
+    if (error != ESP_OK) {
+        ESP_LOGW(TAG, "post_raw %s failed: %s (%d)", path, esp_err_to_name(error), status);
+    }
     return (error == ESP_OK && (status == 200 || status == 201)) ? ESP_OK : ESP_FAIL;
 }
 

@@ -545,7 +545,8 @@ def clear_events(args: argparse.Namespace) -> int:
 def fetch_drawing(args: argparse.Namespace) -> int:
     """Save the newest drawing/artifact image to a PNG the agent can open."""
     events = bridge_request(args, "/v1/events").get("events", [])
-    candidates = [e for e in events if e.get("image_b64")]
+    candidates = [e for e in events
+                  if e.get("image_b64") and len(base64.b64decode(e["image_b64"])) > 4]
     if not candidates:
         raise SystemExit("No drawings or image artifacts yet.")
     event = candidates[-1]
@@ -556,6 +557,8 @@ def fetch_drawing(args: argparse.Namespace) -> int:
     packed = base64.b64decode(event["image_b64"])
     w = packed[0] | (packed[1] << 8)
     h = packed[2] | (packed[3] << 8)
+    if len(packed) < 4 + w * h * 2:
+        raise SystemExit(f"#{event['id']}: image payload truncated")
     px = packed[4:4 + w * h * 2]
     im = Image.new("RGB", (w, h))
     data = im.load()

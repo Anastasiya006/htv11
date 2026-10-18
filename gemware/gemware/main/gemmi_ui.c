@@ -1170,7 +1170,7 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     init_compact_pet_hud(screen);
     pet_badge = lv_label_create(screen);
     lv_obj_set_pos(pet_badge, 110, 8);
-    lv_obj_set_size(pet_badge, 118, 12);
+    lv_obj_set_size(pet_badge, 100, 12);
     lv_obj_set_style_text_font(pet_badge, UI_MONO, 0);
     /* Small black rhombus as the gems icon at the badge's right edge. */
     lv_obj_t *gems_icon = pet_outline(screen, 214, 9, 11, 10);

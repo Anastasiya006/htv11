@@ -386,8 +386,9 @@ esp_err_t gemmi_bridge_post_raw(const char *path, const char *body)
         error = esp_http_client_perform(client);
         status = esp_http_client_get_status_code(client);
     }
-    if (error != ESP_OK) {
-        ESP_LOGW(TAG, "post_raw %s failed: %s (%d)", path, esp_err_to_name(error), status);
+    if (error != ESP_OK || (status != 200 && status != 201)) {
+        ESP_LOGW(TAG, "post_raw %s failed: err=%s status=%d", path,
+                 esp_err_to_name(error), status);
     }
     return (error == ESP_OK && (status == 200 || status == 201)) ? ESP_OK : ESP_FAIL;
 }

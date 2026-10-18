@@ -137,7 +137,7 @@ static int detail_agent = -1;
 static int agents_page;
 static bool image_pending;
 static bool draw_mode;
-static lv_obj_t *draw_pad, *draw_button;
+static lv_obj_t *draw_pad, *draw_button, *draw_title, *draw_hint;
 static lv_obj_t *choice_rows[3], *ask_back_row, *ask_confirm_row;
 static lv_obj_t *choice_dots[3];
 static lv_obj_t *choice_ticks[3];
@@ -422,12 +422,18 @@ static void set_status(const char *status)
     else if (!strcmp(status, "gemmi is back online")) action = "Connect";
     else if (!strcmp(status, "gemmi checked - no asks")) action = "Check";
     else if (!strcmp(status, "gemmi found no artifact")) action = "Browse";
+    else if (!strcmp(status, "doodle sent")) action = "Send";
+    else if (!strcmp(status, "doodle failed")) action = "Retry";
+    else if (!strcmp(status, "Task complete") || !strcmp(status, "Level up!")) action = "Celebrate";
+    else if (!strcmp(status, "Idle")) action = "Rest";
     if (!strcmp(action, "needs-attention")) action = "Answer";
     else if (!strcmp(action, "working")) action = "Work";
     else if (!strcmp(action, "reading")) action = "Read";
     else if (!strcmp(action, "thinking")) action = "Think";
     else if (!strcmp(action, "viewing")) action = "View";
     else if (!strcmp(action, "idle")) action = "Rest";
+    else if (!strcmp(action, "success")) action = "Celebrate";
+    else if (!strcmp(action, "error")) action = "Retry";
     char caption[64];
     snprintf(caption, sizeof(caption), "%s", action);
     if (caption[0] >= 'a' && caption[0] <= 'z') caption[0] -= 'a' - 'A';
@@ -438,9 +444,9 @@ static void set_status(const char *status)
         !strcmp(action, "View")) {
         colour = 0x8B3FD9;
     } else if (!strcmp(action, "Send") || !strcmp(action, "Connect") ||
-               !strcmp(action, "success")) {
+               !strcmp(action, "Celebrate")) {
         colour = 0x2E8B57;
-    } else if (!strcmp(action, "Reconnect") || !strcmp(action, "error")) {
+    } else if (!strcmp(action, "Reconnect") || !strcmp(action, "Retry")) {
         colour = 0xB04A1E;
     } else if (strcmp(action, "Rest") && strcmp(action, "Manage")) {
         /* any real activity state: working, thinking, reading, watching… */
@@ -601,6 +607,8 @@ static void enter_agents_list(void)
     stop_monitor();
     if (draw_button) lv_obj_add_flag(draw_button, LV_OBJ_FLAG_HIDDEN);
     if (draw_pad) lv_obj_add_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
+    if (draw_title) lv_obj_add_flag(draw_title, LV_OBJ_FLAG_HIDDEN);
+    if (draw_hint) lv_obj_add_flag(draw_hint, LV_OBJ_FLAG_HIDDEN);
     draw_mode = false;
     agents_mode = 1;
     if (store_button) lv_obj_add_flag(store_button, LV_OBJ_FLAG_HIDDEN);
@@ -714,6 +722,8 @@ static void show_home(void)
     hide_jpeg();
     if (draw_button) lv_obj_add_flag(draw_button, LV_OBJ_FLAG_HIDDEN);
     if (draw_pad) lv_obj_add_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
+    if (draw_title) lv_obj_add_flag(draw_title, LV_OBJ_FLAG_HIDDEN);
+    if (draw_hint) lv_obj_add_flag(draw_hint, LV_OBJ_FLAG_HIDDEN);
     if (ask_panel) lv_obj_add_flag(ask_panel, LV_OBJ_FLAG_HIDDEN);
     for (int i = 0; i < 3; i++) {
         if (choice_rows[i]) lv_obj_add_flag(choice_rows[i], LV_OBJ_FLAG_HIDDEN);
@@ -1131,6 +1141,9 @@ static void send_choice(int slot)
 /* --- Doodle mode: draw a picture for the agent being viewed --- */
 #define DRAW_STROKES 8
 #define DRAW_PTS 48
+#define DRAW_PAD_W 216
+#define DRAW_PAD_H 140
+#define DRAW_PAD_Y 114
 static lv_obj_t *stroke_objs[DRAW_STROKES];
 static lv_point_precise_t stroke_pts[DRAW_STROKES][DRAW_PTS];
 static int stroke_count, stroke_len;
@@ -1165,6 +1178,18 @@ static void exit_draw(void)
     show_home();
 }
 
+static void clear_drawing(void)
+{
+    memset(draw_buf, 0xFF, sizeof(draw_buf));
+    draw_buf[0] = 72; draw_buf[1] = 0; draw_buf[2] = 54; draw_buf[3] = 0;
+    stroke_count = stroke_len = 0;
+    last_bx = last_by = 0;
+    for (int i = 0; i < DRAW_STROKES; i++) {
+        if (stroke_objs[i]) lv_obj_add_flag(stroke_objs[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (draw_hint) lv_obj_remove_flag(draw_hint, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void send_drawing(void)
 {
     draw_json = malloc(11000);
@@ -1181,10 +1206,16 @@ static void send_drawing(void)
     } else {
         ESP_LOGW("draw", "json malloc failed — heap too fragmented");
     }
+    if (sent != ESP_OK) {
+        /* A network hiccup or fragmented heap should not discard a human's
+         * picture. Keep the canvas and Send action available for retry. */
+        set_status("doodle failed");
+        return;
+    }
     draw_mode = false;
     if (draw_pad) lv_obj_add_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
     show_home();
-    set_status(sent == ESP_OK ? "doodle sent" : "doodle failed");
+    set_status("doodle sent");
 }
 
 static void on_draw_pad(lv_event_t *event)
@@ -1196,8 +1227,11 @@ static void on_draw_pad(lv_event_t *event)
     lv_area_t area;
     lv_obj_get_coords(draw_pad, &area);
     int px = p.x - area.x1, py = p.y - area.y1;
-    if (px < 0 || py < 0 || px >= 216 || py >= 162) return;
+    if (px < 0 || py < 0 || px >= DRAW_PAD_W || py >= DRAW_PAD_H) return;
     lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED && draw_hint) {
+        lv_obj_add_flag(draw_hint, LV_OBJ_FLAG_HIDDEN);
+    }
     ESP_LOGI("draw", "pad event %d at %d,%d strokes=%d", (int)code, px, py, stroke_count);
     if (code == LV_EVENT_PRESSED && stroke_len > 0) {
         stroke_count++; /* fresh stroke on lift+press */
@@ -1214,7 +1248,7 @@ static void on_draw_pad(lv_event_t *event)
     stroke_pts[stroke_count][stroke_len++] = (lv_point_precise_t){px, py};
     /* enter_draw hides every stroke — reveal it again on first reuse. */
     lv_obj_remove_flag(stroke_objs[stroke_count], LV_OBJ_FLAG_HIDDEN);
-    int bx = px * 72 / 216, by = py * 54 / 162;
+    int bx = px * 72 / DRAW_PAD_W, by = py * 54 / DRAW_PAD_H;
     /* Rasterise the SEGMENT from the last point so fast drags don't leave
      * dotted lines in the sent image. */
     int x0 = (code == LV_EVENT_PRESSED || stroke_len == 1) ? bx : last_bx;
@@ -1239,20 +1273,17 @@ static void on_draw_pad(lv_event_t *event)
 static void enter_draw(void)
 {
     draw_mode = true;
-    /* Leave a real header for Gemmi, then place the pad below it. */
-    lv_obj_set_height(scene_obj, 250);
-    sprite_mode = 1;
+    /* Match the Agent Log header: centered 96px Gemmi, then the card. */
+    lv_obj_set_height(scene_obj, 256);
+    sprite_mode = 3;
     apply_sprite_mode();
     show_console(false);
     show_log(false);
     lv_obj_add_flag(musing_label, LV_OBJ_FLAG_HIDDEN);
-    memset(draw_buf, 0xFF, sizeof(draw_buf));
-    draw_buf[0] = 72; draw_buf[1] = 0; draw_buf[2] = 54; draw_buf[3] = 0;
-    stroke_count = stroke_len = 0;
     if (!draw_pad) {
         draw_pad = lv_obj_create(scene_obj);
-        lv_obj_set_pos(draw_pad, 12, 60);
-        lv_obj_set_size(draw_pad, 216, 162);
+        lv_obj_set_pos(draw_pad, 12, DRAW_PAD_Y);
+        lv_obj_set_size(draw_pad, DRAW_PAD_W, DRAW_PAD_H);
         lv_obj_set_style_bg_color(draw_pad, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_border_color(draw_pad, lv_color_hex(0x888888), 0);
         lv_obj_set_style_border_width(draw_pad, 1, 0);
@@ -1260,19 +1291,37 @@ static void enter_draw(void)
         lv_obj_set_style_pad_all(draw_pad, 0, 0);
         lv_obj_add_event_cb(draw_pad, on_draw_pad, LV_EVENT_PRESSED, NULL);
         lv_obj_add_event_cb(draw_pad, on_draw_pad, LV_EVENT_PRESSING, NULL);
+        draw_title = lv_label_create(scene_obj);
+        lv_label_set_text(draw_title, "Doodle");
+        lv_obj_set_pos(draw_title, 20, DRAW_PAD_Y - 5);
+        lv_obj_set_style_text_font(draw_title, UI_MONO, 0);
+        lv_obj_set_style_text_color(draw_title, lv_color_hex(0x444444), 0);
+        lv_obj_set_style_bg_color(draw_title, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(draw_title, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_hor(draw_title, 4, 0);
+        lv_obj_add_flag(draw_title, LV_OBJ_FLAG_HIDDEN);
+        draw_hint = lv_label_create(draw_pad);
+        lv_label_set_text(draw_hint, "make a quick sketch");
+        lv_obj_set_pos(draw_hint, 10, (DRAW_PAD_H - 18) / 2);
+        lv_obj_set_size(draw_hint, DRAW_PAD_W - 20, 18);
+        lv_obj_set_style_text_font(draw_hint, UI_BODY, 0);
+        lv_obj_set_style_text_align(draw_hint, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(draw_hint, lv_color_hex(0x999999), 0);
+        lv_obj_add_flag(draw_hint, LV_OBJ_FLAG_HIDDEN);
         for (int i = 0; i < DRAW_STROKES; i++) stroke_objs[i] = NULL;
     }
-    for (int i = 0; i < DRAW_STROKES; i++) {
-        if (stroke_objs[i]) lv_obj_add_flag(stroke_objs[i], LV_OBJ_FLAG_HIDDEN);
-    }
-    lv_obj_set_pos(draw_pad, 12, 60);
+    clear_drawing();
+    lv_obj_set_pos(draw_pad, 12, DRAW_PAD_Y);
+    lv_obj_set_size(draw_pad, DRAW_PAD_W, DRAW_PAD_H);
     lv_obj_remove_flag(draw_pad, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(draw_pad);
+    lv_obj_remove_flag(draw_title, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(draw_title);
     set_status("Draw");
     set_dock_caption(0, "send");
-    set_dock_caption(1, "back");
-    set_dock_caption(2, "");
-    layout_dock(2);
+    set_dock_caption(1, "clear");
+    set_dock_caption(2, "back");
+    layout_dock(3);
 }
 
 static void on_draw_button(lv_event_t *event) { LV_UNUSED(event); enter_draw(); }
@@ -1282,7 +1331,8 @@ static void on_dock(lv_event_t *event)
     int slot = (int)(uintptr_t)lv_event_get_user_data(event);
     if (draw_mode) {
         if (slot == 0) send_drawing();
-        else if (slot == 1) exit_draw();
+        else if (slot == 1) clear_drawing();
+        else if (slot == 2) exit_draw();
         return;
     }
     if (image_pending) {

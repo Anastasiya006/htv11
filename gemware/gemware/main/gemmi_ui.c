@@ -21,9 +21,48 @@
 #include "gemmi_pet.h"
 #include "lvgl.h"
 #include "src/misc/cache/instance/lv_image_cache.h"
+#include "halloween_assets/shop/witch-hat.inc"
+#include "halloween_assets/shop/pumpkin-beanie.inc"
+#include "halloween_assets/shop/bat-bow.inc"
+#include "halloween_assets/shop/moon-scarf.inc"
+#include "halloween_assets/shop/candy-bandana.inc"
+#include "halloween_assets/shop/ghost-cookie.inc"
+#include "halloween_assets/shop/candy-corn.inc"
+#include "halloween_assets/shop/pumpkin-cupcake.inc"
+#include "halloween_assets/overlay/witch-hat.inc"
+#include "halloween_assets/overlay/pumpkin-beanie.inc"
+#include "halloween_assets/overlay/bat-bow.inc"
+#include "halloween_assets/overlay/moon-scarf.inc"
+#include "halloween_assets/overlay/candy-bandana.inc"
+#include "halloween_assets/overlay/ghost-cookie.inc"
+#include "halloween_assets/overlay/candy-corn.inc"
+#include "halloween_assets/overlay/pumpkin-cupcake.inc"
 #ifdef GEMMI_SYSTEM_MENLO
 #include "gemmi_ui_scale.h"
 #endif
+
+#define SHOP_ASSET(sym, width, height) { .header.magic = LV_IMAGE_HEADER_MAGIC, .header.cf = LV_COLOR_FORMAT_RAW, .header.w = width, .header.h = height, .data_size = sizeof(sym), .data = sym }
+static const lv_image_dsc_t halloween_shop_pngs[8] = {
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_witch_hat_png, 32, 32),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_pumpkin_beanie_png, 32, 32),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_bat_bow_png, 32, 32),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_moon_scarf_png, 32, 32),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_candy_bandana_png, 32, 32),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_ghost_cookie_png, 32, 32),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_candy_corn_png, 32, 32),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_shop_pumpkin_cupcake_png, 32, 32),
+};
+static const lv_image_dsc_t halloween_overlay_pngs[8] = {
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_witch_hat_png, 96, 96),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_pumpkin_beanie_png, 96, 96),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_bat_bow_png, 96, 96),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_moon_scarf_png, 96, 96),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_candy_bandana_png, 96, 96),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_ghost_cookie_png, 96, 96),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_candy_corn_png, 96, 96),
+    SHOP_ASSET(gemware_gemware_main_halloween_assets_overlay_pumpkin_cupcake_png, 96, 96),
+};
+#undef SHOP_ASSET
 
 #define SCREEN_W 240
 #define SCREEN_H 320
@@ -98,6 +137,10 @@ static lv_obj_t *pet_badge;
 static lv_obj_t *ask_back;
 
 static lv_obj_t *shop_panel, *shop_feedback, *shop_cards[4], *shop_prices[4];
+static lv_obj_t *shop_price_gems[4];
+static uint16_t gem_icon_px[10 * 10];
+static lv_image_dsc_t gem_icon_dsc;
+static bool gem_icon_ready;
 static lv_obj_t *store_button;
 static lv_obj_t *shop_previews[4], *shop_names[4], *shop_title;
 static unsigned shop_page;
@@ -105,6 +148,8 @@ static const int shop_catalog[8] = {0, 1, 2, 7, 3, 4, 5, 6};
 static void draw_shop_preview(lv_obj_t *preview, unsigned item);
 static lv_obj_t *pet_glasses, *pet_crown, *pet_bow;
 static lv_obj_t *pet_halo, *pet_antenna, *pet_scarf, *pet_horns;
+static lv_obj_t *pet_item_image;
+static lv_timer_t *shop_overlay_timer;
 static lv_obj_t *jpeg_view;
 static lv_image_dsc_t jpeg_dsc;
 static uint8_t *jpeg_buf;
@@ -113,6 +158,39 @@ static void on_pet(lv_event_t *event);
 static void on_rest(lv_event_t *event);
 static void refresh_pet_badge(void);
 static void refresh_pet_look(void);
+
+static void init_gem_icon(void)
+{
+    if (gem_icon_ready) return;
+    for (int y = 0; y < 10; y++) {
+        for (int x = 0; x < 10; x++) {
+            int dx = x - 4;
+            int dy = y - 4;
+            if (dx < 0) dx = -dx;
+            if (dy < 0) dy = -dy;
+            gem_icon_px[y * 10 + x] = (dx + dy <= 4) ? 0x1800 : 0xFFFF;
+        }
+    }
+    gem_icon_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    gem_icon_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+    gem_icon_dsc.header.w = 10;
+    gem_icon_dsc.header.h = 10;
+    gem_icon_dsc.header.stride = 20;
+    gem_icon_dsc.header.flags = 0;
+    gem_icon_dsc.data = (const uint8_t *)gem_icon_px;
+    gem_icon_dsc.data_size = sizeof(gem_icon_px);
+    gem_icon_ready = true;
+}
+
+static lv_obj_t *create_gem_icon(lv_obj_t *parent, int x, int y)
+{
+    init_gem_icon();
+    lv_obj_t *icon = lv_image_create(parent);
+    lv_obj_set_pos(icon, x, y);
+    lv_image_set_src(icon, &gem_icon_dsc);
+    lv_obj_remove_flag(icon, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    return icon;
+}
 static void render_pet_room(const char *feedback);
 static uint32_t current_animation = GEMMI_ANIM_IDLE;
 
@@ -216,6 +294,10 @@ static void apply_sprite_mode(void)
     } else if (sprite_mode == 3) {
         lv_obj_set_size(gif, 96, 96);
         lv_image_set_scale(gif, 96 * 4);
+        lv_obj_align(gif, LV_ALIGN_TOP_MID, 0, 10);
+    } else if (sprite_mode == 5) {
+        lv_obj_set_size(gif, 120, 120);
+        lv_image_set_scale(gif, 120 * 4);
         lv_obj_align(gif, LV_ALIGN_TOP_MID, 0, 10);
     } else if (sprite_mode == 4) {
         /* Big sprite anchored to the scene top — the ask strip only shows the
@@ -425,13 +507,13 @@ static void set_status(const char *status)
     else if (!strcmp(status, "doodle sent")) action = "Send";
     else if (!strcmp(status, "doodle failed")) action = "Retry";
     else if (!strcmp(status, "Task complete") || !strcmp(status, "Level up!")) action = "Celebrate";
-    else if (!strcmp(status, "Idle")) action = "Rest";
+    else if (!strcmp(status, "Idle")) action = "Idle";
     if (!strcmp(action, "needs-attention")) action = "Answer";
     else if (!strcmp(action, "working")) action = "Work";
     else if (!strcmp(action, "reading")) action = "Read";
     else if (!strcmp(action, "thinking")) action = "Think";
     else if (!strcmp(action, "viewing")) action = "View";
-    else if (!strcmp(action, "idle")) action = "Rest";
+    else if (!strcmp(action, "idle")) action = "Idle";
     else if (!strcmp(action, "success")) action = "Celebrate";
     else if (!strcmp(action, "error")) action = "Retry";
     char caption[64];
@@ -448,7 +530,7 @@ static void set_status(const char *status)
         colour = 0x2E8B57;
     } else if (!strcmp(action, "Reconnect") || !strcmp(action, "Retry")) {
         colour = 0xB04A1E;
-    } else if (strcmp(action, "Rest") && strcmp(action, "Manage")) {
+    } else if (strcmp(action, "Idle") && strcmp(action, "Manage")) {
         /* any real activity state: working, thinking, reading, watching… */
         colour = 0x3A6AE4;
     }
@@ -774,16 +856,26 @@ static void refresh_pet_badge(void)
 
 }
 
+static void keep_shop_overlay(lv_timer_t *timer)
+{
+    LV_UNUSED(timer);
+    if (!pet_mode || !pet_item_image) return;
+    refresh_pet_look();
+    lv_obj_move_foreground(pet_item_image);
+}
+
 static void render_pet_room(const char *feedback)
 {
     if (!shop_panel) return;
     if (!pet_mode) {
+        if (shop_overlay_timer) { lv_timer_delete(shop_overlay_timer); shop_overlay_timer = NULL; }
         lv_obj_add_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
         if (!ask_foreground && !agents_mode) { sprite_mode = 0; apply_sprite_mode(); }
         lv_obj_invalidate(lv_obj_get_screen(bubble_obj));
         return;
     }
-    sprite_mode = 3;
+    sprite_mode = 5;
+    if (!shop_overlay_timer) shop_overlay_timer = lv_timer_create(keep_shop_overlay, 250, NULL);
     apply_sprite_mode();
     show_console(false);
     lv_obj_remove_flag(shop_panel, LV_OBJ_FLAG_HIDDEN);
@@ -794,14 +886,35 @@ static void render_pet_room(const char *feedback)
         int item = shop_catalog[shop_page * 4 + i];
         if (item < 0) { lv_obj_add_flag(shop_cards[i], LV_OBJ_FLAG_HIDDEN); continue; }
         lv_obj_remove_flag(shop_cards[i], LV_OBJ_FLAG_HIDDEN);
-        const char *names[] = {"Specs", "Crown", "Halo", "Stalk", "Scarf", "Phones", "Bow", "Snack"};
+        const char *names[] = {"Witch", "Pump", "Bat", "Moon", "Candy", "Ghost", "Corn", "Cake"};
         lv_label_set_text(shop_names[i], names[item]);
         lv_obj_clean(shop_previews[i]);
         draw_shop_preview(shop_previews[i], (unsigned)item);
         bool owned = item < GEMMI_PET_ITEM_COUNT && (stats->owned & (1u << item));
         bool equipped = item < GEMMI_PET_ITEM_COUNT && stats->equipped == (unsigned)item + 1;
-        snprintf(price, sizeof(price), "%s", equipped ? "On" : owned ? "Owned" : "");
-        if (!owned) snprintf(price, sizeof(price), "%lu gems", (unsigned long)(item < GEMMI_PET_ITEM_COUNT ? gemmi_pet_items[item].cost : 3));
+        if (equipped) {
+            snprintf(price, sizeof(price), "On");
+            lv_obj_add_flag(shop_price_gems[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_pos(shop_prices[i], 1, 42);
+            lv_obj_set_size(shop_prices[i], 43, 14);
+            lv_obj_set_style_text_align(shop_prices[i], LV_TEXT_ALIGN_CENTER, 0);
+        } else if (owned) {
+            snprintf(price, sizeof(price), "Owned");
+            lv_obj_add_flag(shop_price_gems[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_pos(shop_prices[i], 1, 42);
+            lv_obj_set_size(shop_prices[i], 43, 14);
+            lv_obj_set_style_text_align(shop_prices[i], LV_TEXT_ALIGN_CENTER, 0);
+        } else {
+            snprintf(price, sizeof(price), "%lu", (unsigned long)(item < GEMMI_PET_ITEM_COUNT ? gemmi_pet_items[item].cost : 3));
+            lv_obj_remove_flag(shop_price_gems[i], LV_OBJ_FLAG_HIDDEN);
+            int text_width = (int)strlen(price) * 8;
+            int group_width = text_width + 2 + 12;
+            int group_left = (47 - group_width) / 2;
+            lv_obj_set_pos(shop_prices[i], group_left, 42);
+            lv_obj_set_size(shop_prices[i], text_width, 14);
+            lv_obj_set_style_text_align(shop_prices[i], LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_pos(shop_price_gems[i], group_left + text_width + 2, 41);
+        }
         lv_label_set_text(shop_prices[i], price);
         lv_obj_set_style_border_color(shop_cards[i], lv_color_hex(equipped ? 0x9477AA : 0xD3CFD8), 0);
         lv_obj_set_style_bg_color(shop_cards[i], lv_color_hex(equipped ? 0xF5F1FA : 0xFFFFFF), 0);
@@ -814,7 +927,7 @@ static void render_pet_room(const char *feedback)
 
 static void open_pet_room(void)
 {
-    if (ask_foreground || ask_pending || agents_mode) return;
+    if (ask_foreground || agents_mode || draw_mode) return;
     pet_mode = !pet_mode;
     render_pet_room(NULL);
 }
@@ -834,7 +947,7 @@ static void on_shop_next(lv_event_t *event) { LV_UNUSED(event); shop_page = 1 - 
 static void on_rest(lv_event_t *event)
 {
     LV_UNUSED(event);
-    if (ask_foreground || ask_pending || agents_mode) return;
+    if (ask_foreground || agents_mode || draw_mode) return;
     gemmi_pet_care(2);
     play_state("idle", false);
     refresh_pet_badge();
@@ -842,7 +955,7 @@ static void on_rest(lv_event_t *event)
 static void on_pet(lv_event_t *event)
 {
     LV_UNUSED(event);
-    if (ask_foreground || ask_pending || agents_mode) return;
+    if (ask_foreground || agents_mode || draw_mode) return;
     gemmi_pet_care(0);
     refresh_pet_badge();
     play_state("success", true);
@@ -1066,7 +1179,7 @@ static void ask_snooze_cb(lv_timer_t *timer)
 {
     ask_snooze = NULL;
     lv_timer_delete(timer);
-    if (ask_pending && !image_pending) enter_ask();
+    if (ask_pending && !image_pending && !pet_mode && !agents_mode && !draw_mode) enter_ask();
 }
 
 /* Back only navigates: keep the question pending and resurface it in a
@@ -1510,7 +1623,7 @@ static void refresh_pet_look(void)
 {
     if (!pet_glasses || !pet_crown) return;
     unsigned equipped = gemmi_pet_stats()->equipped;
-    bool visible = sprite_mode == 0 || sprite_mode == 3;
+    bool visible = pet_mode || sprite_mode == 0 || sprite_mode == 3 || sprite_mode == 5;
     lv_obj_add_flag(pet_glasses, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(pet_crown, LV_OBJ_FLAG_HIDDEN);
     if (pet_bow) lv_obj_add_flag(pet_bow, LV_OBJ_FLAG_HIDDEN);
@@ -1518,6 +1631,26 @@ static void refresh_pet_look(void)
     if (pet_antenna) lv_obj_add_flag(pet_antenna, LV_OBJ_FLAG_HIDDEN);
     if (pet_scarf) lv_obj_add_flag(pet_scarf, LV_OBJ_FLAG_HIDDEN);
     if (pet_horns) lv_obj_add_flag(pet_horns, LV_OBJ_FLAG_HIDDEN);
+    if (pet_item_image) lv_obj_add_flag(pet_item_image, LV_OBJ_FLAG_HIDDEN);
+    if (visible && equipped >= 1 && equipped <= GEMMI_PET_ITEM_COUNT && pet_item_image) {
+        lv_image_set_src(pet_item_image, &halloween_overlay_pngs[equipped - 1]);
+        if (sprite_mode == 0) {
+            lv_obj_set_size(pet_item_image, GIF_SIZE, GIF_SIZE);
+            lv_image_set_scale(pet_item_image, 416);
+            lv_obj_align(pet_item_image, LV_ALIGN_CENTER, 0, 0);
+        } else if (sprite_mode == 5) {
+            lv_obj_set_size(pet_item_image, 120, 120);
+            lv_image_set_scale(pet_item_image, 320);
+            lv_obj_align(pet_item_image, LV_ALIGN_TOP_MID, 0, 10);
+        } else {
+            lv_obj_set_size(pet_item_image, 96, 96);
+            lv_image_set_scale(pet_item_image, 256);
+            lv_obj_align(pet_item_image, LV_ALIGN_TOP_MID, 0, 10);
+        }
+        lv_obj_remove_flag(pet_item_image, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(pet_item_image);
+        return;
+    }
     if (visible && equipped == GEMMI_PET_GLASSES + 1) {
         lv_obj_remove_flag(pet_glasses, LV_OBJ_FLAG_HIDDEN);
         /* The room uses the smaller native sprite; keep accessories proportional. */
@@ -1573,6 +1706,7 @@ static void refresh_pet_look(void)
     if (pet_antenna) lv_obj_move_foreground(pet_antenna);
     if (pet_scarf) lv_obj_move_foreground(pet_scarf);
     if (pet_horns) lv_obj_move_foreground(pet_horns);
+    if (pet_item_image) lv_obj_move_foreground(pet_item_image);
 }
 
 #ifdef GEMMI_SYSTEM_MENLO
@@ -1605,6 +1739,38 @@ static lv_obj_t *pet_caption(lv_obj_t *parent, const char *text, int x, int y, i
 }
 static void draw_shop_preview(lv_obj_t *preview, unsigned item)
 {
+    if (item < 8) {
+        lv_obj_t *image = lv_image_create(preview);
+        lv_obj_set_pos(image, -3, -4);
+        lv_image_set_src(image, &halloween_shop_pngs[item]);
+        lv_image_set_scale(image, 100);
+        return;
+    }
+    /* New seasonal catalog art. */
+    uint32_t main = 0x806A9A;
+    if (item == 0) main = 0x5D476F;       /* witch hat */
+    else if (item == 1) main = 0xE99A4D;  /* pumpkin beanie */
+    else if (item == 2) main = 0x59416F;  /* bat bow tie */
+    else if (item == 4) main = 0xD8894C;  /* candy bandana */
+    else if (item == 5) main = 0xE8DDC5;  /* ghost cookie */
+    else if (item == 6) main = 0xF4C65D;  /* candy corn */
+    else if (item == 7) main = 0xF0A052;  /* pumpkin cupcake */
+    lv_obj_t *art = pet_outline(preview, 3, 7, 18, 14);
+    lv_obj_set_style_bg_color(art, lv_color_hex(main), 0);
+    lv_obj_set_style_bg_opa(art, LV_OPA_COVER, 0);
+    if (item == 0) {
+        lv_obj_t *tip = pet_outline(preview, 9, 2, 6, 9); lv_obj_set_style_bg_color(tip, lv_color_hex(main), 0); lv_obj_set_style_bg_opa(tip, LV_OPA_COVER, 0);
+        lv_obj_t *brim = pet_outline(preview, 1, 18, 21, 4); lv_obj_set_style_bg_color(brim, lv_color_hex(0x3E304C), 0); lv_obj_set_style_bg_opa(brim, LV_OPA_COVER, 0);
+    } else if (item == 1 || item == 7) {
+        lv_obj_t *stem = pet_outline(preview, 11, 3, 4, 5); lv_obj_set_style_bg_color(stem, lv_color_hex(0x75966C), 0); lv_obj_set_style_bg_opa(stem, LV_OPA_COVER, 0);
+    } else if (item == 2) {
+        lv_obj_t *wing = pet_outline(preview, 0, 9, 22, 8); lv_obj_set_style_bg_color(wing, lv_color_hex(0x392A4D), 0); lv_obj_set_style_bg_opa(wing, LV_OPA_COVER, 0);
+    } else if (item == 5) {
+        lv_obj_t *eye1 = pet_outline(preview, 8, 11, 3, 4); lv_obj_set_style_bg_color(eye1, lv_color_hex(0x5A4774), 0); lv_obj_set_style_bg_opa(eye1, LV_OPA_COVER, 0);
+        lv_obj_t *eye2 = pet_outline(preview, 14, 11, 3, 4); lv_obj_set_style_bg_color(eye2, lv_color_hex(0x5A4774), 0); lv_obj_set_style_bg_opa(eye2, LV_OPA_COVER, 0);
+    }
+    return;
+    /* Legacy accessory previews retained below. */
         if (item == 0) {
             static const lv_point_precise_t specs[] = {PP(1,7),PP(8,7),PP(8,14),PP(1,14),PP(1,7),PP(8,7),PP(8,10),PP(14,10),PP(14,7),PP(21,7),PP(21,14),PP(14,14),PP(14,7)};
             for (int lens = 0; lens < 2; lens++) {
@@ -1691,12 +1857,16 @@ static void init_compact_pet_hud(lv_obj_t *screen)
         lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
         lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(card, on_shop_item, LV_EVENT_PRESSED, (void *)(uintptr_t)i);
-        shop_previews[i] = pet_outline(card, 12, 4, 23, 21);
+        shop_previews[i] = pet_outline(card, 8, 2, 31, 25);
         lv_obj_set_style_border_width(shop_previews[i], 0, 0);
         shop_names[i] = pet_caption(card, "", 1, 28, 43);
         lv_obj_set_style_text_align(shop_names[i], LV_TEXT_ALIGN_CENTER, 0);
-        shop_prices[i] = pet_caption(card, "", 1, 42, 43);
+        shop_prices[i] = pet_caption(card, "", 2, 42, 25);
         lv_obj_set_style_text_align(shop_prices[i], LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(shop_prices[i], LV_LABEL_LONG_CLIP);
+        shop_price_gems[i] = create_gem_icon(card, 28, 41);
+        lv_image_set_scale(shop_price_gems[i], 120);
+        lv_obj_add_flag(shop_price_gems[i], LV_OBJ_FLAG_HIDDEN);
     }
     shop_feedback = pet_caption(shop_panel, "Tap to buy / equip", 8, 88, 198);
     lv_obj_set_style_text_align(shop_feedback, LV_TEXT_ALIGN_CENTER, 0);
@@ -1711,33 +1881,8 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     lv_obj_set_pos(pet_badge, 110, 8);
     lv_obj_set_size(pet_badge, 100, 12);
     lv_obj_set_style_text_font(pet_badge, UI_MONO, 0);
-    /* Small black rhombus as the gems icon — a real filled bitmap, not
-     * stacked line slices. |x-4|+|y-4| <= 4 fills the diamond. */
-    static uint16_t gem_px[10 * 10];
-    static bool gem_px_filled;
-    if (!gem_px_filled) {
-        for (int y = 0; y < 10; y++)
-            for (int x = 0; x < 10; x++) {
-                int dx = x - 4;
-                int dy = y - 4;
-                if (dx < 0) dx = -dx;
-                if (dy < 0) dy = -dy;
-                gem_px[y * 10 + x] = (dx + dy <= 4) ? 0x1800 : 0xFFFF;
-            }
-        gem_px_filled = true;
-    }
-    static lv_image_dsc_t gem_dsc;
-    gem_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
-    gem_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-    gem_dsc.header.w = 10;
-    gem_dsc.header.h = 10;
-    gem_dsc.header.stride = 20;
-    gem_dsc.header.flags = 0;
-    gem_dsc.data = (const uint8_t *)gem_px;
-    gem_dsc.data_size = sizeof(gem_px);
-    lv_obj_t *gems_icon = lv_image_create(screen);
-    lv_obj_set_pos(gems_icon, 214, 7);
-    lv_image_set_src(gems_icon, &gem_dsc);
+    /* Reuse the same filled diamond beside shop prices and the balance. */
+    lv_obj_t *gems_icon = create_gem_icon(screen, 214, 7);
     lv_obj_set_style_text_align(pet_badge, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(pet_badge, LV_LABEL_LONG_DOT);
     lv_obj_add_flag(pet_badge, LV_OBJ_FLAG_CLICKABLE);
@@ -1805,6 +1950,9 @@ static void init_pet_decorations(lv_obj_t *screen, lv_obj_t *scene)
     pet_path(pet_horns, hp_band, 5, 0x8A4A58);
     pet_path(pet_horns, hp_cup_l, 5, 0x8A4A58);
     pet_path(pet_horns, hp_cup_r, 5, 0x8A4A58);
+    pet_item_image = lv_image_create(scene);
+    lv_obj_set_size(pet_item_image, 23, 23);
+    lv_obj_add_flag(pet_item_image, LV_OBJ_FLAG_HIDDEN);
     refresh_pet_look();
 }
 

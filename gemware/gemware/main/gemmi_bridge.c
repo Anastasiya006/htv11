@@ -324,7 +324,10 @@ static void gemmi_bridge_task(void *arg)
         gemmi_ui_show_event(&event);
         gemmi_display_unlock();
         bool image_shown = false;
-        if (strcmp(event.kind, "artifact") == 0) {
+        /* Doodles are the device's own drawings — don't bounce them back as
+         * a blocking image view, just ack and keep moving. */
+        if (strcmp(event.kind, "artifact") == 0 &&
+            strcmp(event.artifact, "doodle") != 0) {
             gemmi_image_t img = fetch_image(event.id);
             if (img.len > 0) {
                 gemmi_display_lock();

@@ -33,7 +33,7 @@ An initial scene can also be selected without rebuilding:
 ```
 
 Available scenes are `home`, `thinking`, `working`, `ask`, `artifact`,
-`agents`, and `offline`. Choice submissions are printed to stdout; the desktop
+`agents`, `error`, and `offline`. Choice submissions are printed to stdout; the desktop
 emulator does not post to a real Gemmi bridge.
 
 Build output stays under `emulator/build/` and is ignored by Git.

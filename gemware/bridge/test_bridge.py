@@ -86,6 +86,27 @@ class BridgeTest(unittest.TestCase):
         # separately with dedicated device ids.
         next_event("dev1")
 
+    def test_audio_disabled_returns_conflict(self):
+        self.assertEqual(req("POST", "/v1/audio/test", {"sound": "ready"})[0], 409)
+
+    def test_audio_hooks_and_test_endpoint(self):
+        played = []
+        audio = gb.AudioService("chimes", player=lambda path: played.append(path.read_bytes()))
+        gb.BridgeHandler.audio = audio
+        try:
+            self.assertEqual(post({"kind": "ask", "agent": "audio-agent", "message": "Proceed?"})[0], 201)
+            self.assertEqual(req("POST", "/v1/audio/test", {"sound": "ready"})[0], 202)
+            self.assertEqual(req("POST", "/v1/audio/test", {"sound": []})[0], 400)
+            self.assertEqual(req("POST", "/v1/audio/test", ["ready"])[0], 400)
+            audio.jobs.join()
+            self.assertEqual(len(played), 2)
+            status, body = req("GET", "/health")
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body)["audio"]["played"], 2)
+        finally:
+            gb.BridgeHandler.audio = None
+            audio.close()
+
     def test_notify_deliver_and_ack(self):
         st, _ = post({"kind": "status", "agent": "a1", "message": "hello"})
         self.assertEqual(st, 201)

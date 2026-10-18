@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from gemmi_audio import AudioService, CUES, DEFAULT_MODEL, load_env_key
+
 DEFAULT_PORT = 8732
 MAX_BODY_BYTES = 131072
 MAX_IMAGE_B64 = 90000
@@ -266,6 +268,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
     store: EventStore
     token: str | None
     lockdown_path: Path
+    audio: AudioService | None = None
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"gemmi bridge: {self.address_string()} - {format % args}")
@@ -306,7 +309,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             return
         parsed = urlparse(self.path)
         if parsed.path == "/health":
-            self.send_json(HTTPStatus.OK, {"ok": True, "version": 1})
+            self.send_json(HTTPStatus.OK, {"ok": True, "version": 1, "audio": self.audio.status() if self.audio else {"mode": "off"}})
             return
         if parsed.path.startswith("/v1/agent/"):
             agent = parsed.path.rsplit("/", 1)[1].strip()
@@ -376,6 +379,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/v1/events":
                 event = self.store.append(normalise_event(json.loads(self.read_body())))
+                if self.audio:
+                    self.audio.submit(event)
                 self.send_json(HTTPStatus.CREATED, event)
                 return
             if parsed.path == "/v1/drawing":
@@ -391,6 +396,16 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "image_b64": payload.get("image_b64", ""),
                 }))
                 self.send_json(HTTPStatus.CREATED, event)
+                return
+            if parsed.path == "/v1/audio/test":
+                if not self.audio:
+                    self.send_json(HTTPStatus.CONFLICT, {"error": "Restart bridge with --audio chimes or --audio speech"})
+                    return
+                payload = json.loads(self.read_body())
+                if not isinstance(payload, dict):
+                    raise ValueError("audio test must be an object")
+                accepted = self.audio.test(payload.get("sound", "ready"))
+                self.send_json(HTTPStatus.ACCEPTED if accepted else HTTPStatus.TOO_MANY_REQUESTS, {"queued": accepted})
                 return
             if parsed.path in ("/v1/device/ack", "/v1/device/respond"):
                 device_id, event_id, choice = device_payload(self.read_body())
@@ -421,6 +436,15 @@ def serve(args: argparse.Namespace) -> int:
     BridgeHandler.token = read_token(Path(args.token_file).expanduser())
     BridgeHandler.lockdown_path = Path(args.lockdown_file).expanduser()
     server = ThreadingHTTPServer((args.host, args.port), BridgeHandler)
+    try:
+        if args.audio == "speech":
+            load_env_key(Path(__file__).resolve().parents[2] / ".env")
+        BridgeHandler.audio = None if args.audio == "off" else AudioService(
+            args.audio, volume=args.audio_volume, model=args.speech_model, voice=args.voice, effect=args.speech_effect)
+    except ValueError as error:
+        server.server_close()
+        raise SystemExit(str(error)) from None
+    print(f"Audio: {args.audio} (uses macOS selected sound output)")
     print(f"Gemmi bridge listening on http://{args.host}:{args.port}")
     print(f"Event store: {BridgeHandler.store.path}")
     print(f"Bridge token gate: {'enabled' if BridgeHandler.token else 'disabled (localhost only)'}")
@@ -430,6 +454,9 @@ def serve(args: argparse.Namespace) -> int:
         print("\nGemmi bridge stopped.")
     finally:
         server.server_close()
+        if BridgeHandler.audio:
+            BridgeHandler.audio.close()
+            BridgeHandler.audio = None
     return 0
 
 
@@ -700,6 +727,12 @@ def provision_device(args: argparse.Namespace) -> int:
     return 0
 
 
+def audio_test(args: argparse.Namespace) -> int:
+    result = bridge_request(args, "/v1/audio/test", method="POST", payload={"sound": args.sound})
+    print("Audio test queued on the bridge's selected output." if result["queued"] else "Audio queue is full.")
+    return 0 if result["queued"] else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Gemmi local agent bridge")
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -709,7 +742,18 @@ def build_parser() -> argparse.ArgumentParser:
     server.add_argument("--store", default=str(default_store_path()))
     server.add_argument("--token-file", default=str(default_token_path()))
     server.add_argument("--lockdown-file", default=str(default_lockdown_path()))
+    server.add_argument("--audio", choices=("off", "chimes", "speech"), default="off")
+    server.add_argument("--audio-volume", type=float, default=0.6, help="playback volume from 0 to 1")
+    server.add_argument("--speech-model", default=DEFAULT_MODEL)
+    server.add_argument("--voice", default="Puck")
+    server.add_argument("--speech-effect", choices=("none", "piano", "chiptune"), default="none")
     server.set_defaults(func=serve)
+    audio = subcommands.add_parser("audio-test", help="play a test through the bridge computer's output")
+    audio.add_argument("--sound", choices=tuple(CUES), default="ready")
+    audio.add_argument("--url", default=DEFAULT_URL)
+    audio.add_argument("--timeout", default=3, type=float)
+    audio.add_argument("--token-file", default=str(default_token_path()))
+    audio.set_defaults(func=audio_test)
     for command, kind, help_text in (
         ("notify", "status", "send a status update"),
         ("ask", "ask", "send a question with up to three choices"),

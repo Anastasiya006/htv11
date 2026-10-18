@@ -95,3 +95,79 @@ The token protects the public endpoint and TLS protects it in transit. The
 ESP32 does not yet use flash encryption or secure boot, so physical possession
 of the board should be treated as credential compromise until those irreversible
 hardware protections are deliberately enabled.
+
+## Laptop / Bluetooth speaker audio
+
+Pair the JBL Go 3 with the **Mac**, then select it under **System Settings →
+Sound → Output**. The server uses the Mac's current default output; the ESP32
+needs no Bluetooth audio code or additional speaker hardware. This output
+selection applies to other Mac applications too.
+
+Start the bridge with local notification sounds (no API key or packages):
+
+```sh
+./gemware/bin/gemmi serve --audio chimes
+./gemware/bin/gemmi audio-test
+./gemware/bin/gemmi audio-test --sound ask
+./gemware/bin/gemmi audio-test --sound success
+```
+
+New questions, completed tasks, errors, and artifacts trigger distinct retro
+virtual-pet bleeps: short, stepped square-wave chirps with soft volume envelopes.
+These are synthesized sounds, not recordings from a Tamagotchi.
+Routine working/thinking updates and log lines stay silent. Audio has a separate,
+bounded priority worker, so playback or speech generation never delays HTTP
+responses or ESP32 polling. Duplicate events and rapid informational repeats
+are suppressed; old queued cues and questions already answered before playback
+are skipped. Existing stored events are not replayed on startup. If the audio
+queue is full, only the sound is skipped—the agent event remains in the bridge.
+
+For **Gemini speech**, put `GEMINI_API_KEY=your-key` in the repository root
+`.env` (ignored by Git), or export it in your terminal, then start:
+
+```sh
+./gemware/bin/gemmi serve --audio speech --voice Puck
+./gemware/bin/gemmi audio-test
+```
+
+Speech uses Google's `gemini-3.8-flash-tts` REST API, with friendly delivery.
+Only fixed notification lines (for example, "Gemmi needs your input!") are
+sent to Gemini. Agent names, questions, prompts, commands, and artifact paths
+stay local. Speech generation uses the API account's quota. The bridge loads only this key from `.env` in speech mode; an existing
+environment value takes precedence. The key stays server-side in the environment and request header; do not
+commit it. Audio files are temporary and removed after playback. If synthesis
+fails, a local chime plays instead. No API key is needed in chime mode.
+
+Options: `--audio off` (default), `--audio-volume 0.6` (range 0–1),
+`--speech-model gemini-3.8-flash-tts`, and `--voice Puck`. Audio playback currently
+supports macOS via `afplay`; changing the default sound output redirects the
+next playback. If Bluetooth disconnects, macOS may route audio to the laptop.
+Stop the server with Ctrl+C to stop local audio.
+
+`GET /health` includes audio mode, queue length, successful playback count,
+skipped cue count, and a sanitized error message. `POST /v1/audio/test` accepts
+`{"sound":"ready"}`; it shares the bridge's existing authentication/lockdown
+checks and returns 409 when audio is disabled. A queued response does not mean
+the speaker has already played it; check the health counters afterward.
+
+Run audio tests without a speaker or Gemini credentials:
+
+```sh
+python3 gemware/bridge/test_audio.py
+python3 gemware/bridge/test_bridge.py
+```
+
+Reference: [Gemini speech generation](https://ai.google.dev/gemini-api/docs/generate-content/speech-generation).
+
+### Musical talking-piano preview
+
+`--audio speech --voice Leda --speech-effect piano` adds local note-based
+resynthesis after Gemini speech generation. It follows syllable rhythm with
+keyboard-like chords, with reduced intelligibility compared with regular speech.
+This optional effect requires NumPy (`python3 -m pip install numpy`); it uses no
+YouTube audio or samples. Omit `--speech-effect` for the regular voice.
+
+For a brighter handheld-game character, use `--speech-effect chiptune` instead:
+this locally re-synthesizes the speech rhythm with octave-up square-wave
+arpeggios and stepped amplitude. It requires NumPy and blends mostly clear speech with a lighter musical layer
+so the words remain easier to understand.
